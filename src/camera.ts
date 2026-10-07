@@ -62,7 +62,7 @@ export function openCamera(onFound: (candidates: string[]) => void): void {
     setProgress(0.05);
     try {
       await getOcrWorker();
-      const candidates = await readLot(source, w, h, crop, setProgress);
+      const { lots: candidates } = await readLot(source, w, h, crop, setProgress);
       if (candidates.length) {
         close();
         onFound(candidates);
