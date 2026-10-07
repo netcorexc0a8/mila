@@ -686,8 +686,8 @@ mark {
   position: absolute;
   left: 8%;
   right: 8%;
-  top: 38%;
-  height: 16%;
+  top: 34%;
+  height: 22%;
   border-radius: 14px;
   box-shadow: 0 0 0 100vmax rgb(0 0 0 / 45%);
 }
@@ -753,7 +753,7 @@ mark {
   position: absolute;
   left: 16px;
   right: 16px;
-  top: calc(56% + 16px);
+  top: calc(56% + 20px);
   margin: 0 auto;
   max-width: 360px;
   padding: 10px 14px;

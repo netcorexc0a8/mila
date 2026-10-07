@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RECALLED_PRODUCTS } from '../data/recall';
-import { ALL_RECALLED_LOTS, canonicalLot, checkLot, extractLotCandidates, normalizeLot } from './lot';
+import { ALL_RECALLED_LOTS, canonicalLot, checkLot, extractLotCandidates, consensusSpelling, fixDigitPrefix, hasConsensus, normalizeLot, rankCandidates } from './lot';
 
 describe('recall data', () => {
   it('has the 57 published lots, each 10 characters', () => {
@@ -91,5 +91,55 @@ describe('extractLotCandidates', () => {
 
   it('ignores text without codes', () => {
     expect(extractLotCandidates('NAN OPTIPRO 800 g')).toEqual([]);
+  });
+});
+
+describe('OCR voting', () => {
+  // Real reads of one can photo (light dot-matrix print on shiny metal).
+  const reads = [['61210348A8'], ['61210346AB'], ['6121034648'], ['61210346A8'], ['61210346AB']];
+
+  it('picks the reading most passes agree on, in its most common spelling', () => {
+    expect(rankCandidates(reads)[0]).toBe('61210346AB');
+  });
+
+  it('drops one-off noise once passes agree', () => {
+    expect(rankCandidates(reads)).toEqual(['61210346AB']);
+  });
+
+  it('keeps all readings when no two passes agree', () => {
+    expect(rankCandidates([['61210348AB'], ['61210366AB']])).toEqual(['61210348AB', '61210366AB']);
+  });
+
+  it('shows "AB" even when most passes read the suffix as "A8" or "48"', () => {
+    expect(rankCandidates([['6121034648'], ['61210346A8'], ['61210346A8']])).toEqual(['61210346AB']);
+  });
+
+  it('reads an all-digit "48" suffix as the letters "AB"', () => {
+    expect(rankCandidates([['6121034648'], ['6121034648']])).toEqual(['61210346AB']);
+  });
+
+  it('votes character by character', () => {
+    expect(consensusSpelling(['61210348AB', '61210346AB', '61210346A8'])).toBe('61210346AB');
+    expect(consensusSpelling(['5124080611', '5124080611'])).toBe('5124080611');
+  });
+
+  it('turns letters in the digit part into digits', () => {
+    expect(fixDigitPrefix('6I21O346AB')).toBe('61210346AB');
+    expect(fixDigitPrefix('52790742C1')).toBe('52790742C1');
+  });
+
+  it('always puts a recalled lot first', () => {
+    expect(rankCandidates([['61210346AB'], ['61210346AB'], ['51510346AB']])[0]).toBe('51510346AB');
+  });
+
+  it('detects consensus when two passes agree up to confusable characters', () => {
+    expect(hasConsensus([['61210348A8'], ['61210346AB']])).toBe(false);
+    expect(hasConsensus([['61210346AB'], ['61210346A8']])).toBe(true);
+    expect(hasConsensus([[], ['51510346AB']])).toBe(true);
+    expect(hasConsensus([[], []])).toBe(false);
+  });
+
+  it('extracts the lot from a real can print with an "L-" prefix', () => {
+    expect(extractLotCandidates('L- 61210346AB 05:13\nMAN 01 05 2026\nEXP 30 04 2028')).toEqual(['61210346AB']);
   });
 });

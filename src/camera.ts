@@ -1,5 +1,4 @@
-import { extractLotCandidates } from './lib/lot';
-import { preprocess, recognize, getOcrWorker } from './lib/ocr';
+import { getOcrWorker, readLot } from './lib/ocr';
 import { icons } from './icons';
 
 /**
@@ -18,7 +17,7 @@ export function openCamera(onFound: (candidates: string[]) => void): void {
     <div class="camera__frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
     <button class="camera__btn camera__close" aria-label="Закрыть">${icons.close(24)}</button>
     <button class="camera__btn camera__torch" aria-label="Фонарик" hidden>${icons.flash(22)}</button>
-    <p class="camera__hint">Наведите рамку на номер партии на дне банки</p>
+    <p class="camera__hint">Наведите рамку на номер партии. Если мешают блики, наклоните банку</p>
     <div class="camera__bar">
       <label class="camera__btn camera__file" aria-label="Выбрать фото">${icons.image(22)}<input type="file" accept="image/*" hidden /></label>
       <button class="camera__shutter" aria-label="Сделать снимок"></button>
@@ -57,19 +56,19 @@ export function openCamera(onFound: (candidates: string[]) => void): void {
     ringVal.style.strokeDashoffset = String(276.5 * (1 - Math.max(0.05, Math.min(1, p))));
   };
 
-  async function run(canvas: HTMLCanvasElement) {
+  async function run(source: CanvasImageSource, w: number, h: number, crop?: DOMRect) {
     busy.hidden = false;
     busySub.textContent = navigator.onLine ? '' : 'Без интернета, на устройстве';
     setProgress(0.05);
     try {
-      const text = await recognize(canvas, setProgress);
-      const candidates = extractLotCandidates(text);
+      await getOcrWorker();
+      const candidates = await readLot(source, w, h, crop, setProgress);
       if (candidates.length) {
         close();
         onFound(candidates);
         return;
       }
-      hint.textContent = 'Не удалось прочитать номер. Подойдите ближе, уберите блики и попробуйте ещё раз, или введите номер вручную.';
+      hint.textContent = 'Не удалось прочитать номер. Наклоните банку, чтобы убрать блики, подойдите ближе и попробуйте ещё раз, или введите номер вручную.';
       hint.classList.add('camera__hint--warn');
     } catch {
       hint.textContent = navigator.onLine
@@ -102,14 +101,19 @@ export function openCamera(onFound: (candidates: string[]) => void): void {
 
   root.querySelector('.camera__shutter')!.addEventListener('click', () => {
     if (!video.videoWidth) return;
-    void run(preprocess(video, video.videoWidth, video.videoHeight, frameCrop()));
+    // Freeze the frame so the voting passes all read the same picture.
+    const still = document.createElement('canvas');
+    still.width = video.videoWidth;
+    still.height = video.videoHeight;
+    still.getContext('2d')!.drawImage(video, 0, 0);
+    void run(still, still.width, still.height, frameCrop());
   });
 
   root.querySelector<HTMLInputElement>('input[type=file]')!.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
     const bitmap = await createImageBitmap(file);
-    void run(preprocess(bitmap, bitmap.width, bitmap.height));
+    void run(bitmap, bitmap.width, bitmap.height);
   });
 
   torchBtn.addEventListener('click', async () => {
