@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 import { VitePWA } from 'vite-plugin-pwa';
 import pkg from './package.json' with { type: 'json' };
 
-// GitHub Pages serves the site from /<repo>/; the deploy workflow sets BASE_PATH.
+// The site is served from the root of mila.wg3664.ru; BASE_PATH can override it (e.g. /<repo>/ on github.io).
 const base = process.env.BASE_PATH ?? '/';
 
 export default defineConfig({

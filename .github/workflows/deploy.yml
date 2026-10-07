@@ -28,7 +28,8 @@ jobs:
       - run: npm test
       - run: npm run build
         env:
-          BASE_PATH: /${{ github.event.repository.name }}/
+          # Served from the root of the custom domain mila.wg3664.ru (see public/CNAME).
+          BASE_PATH: /
       - uses: actions/upload-pages-artifact@v3
         if: github.ref == 'refs/heads/main'
         with:

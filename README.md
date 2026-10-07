@@ -33,4 +33,6 @@ npm run build    # сборка в dist/
 GitHub Actions (`.github/workflows/deploy.yml`) прогоняет тесты, собирает и публикует сайт на GitHub Pages при каждом пуше в `main`.
 Один раз нужно включить: **Settings → Pages → Source: GitHub Actions**.
 
+Адрес: https://mila.wg3664.ru (CNAME в Cloudflare на `netcorexc0a8.github.io`, домен указан в **Settings → Pages → Custom domain** и в `public/CNAME`).
+
 Приложение неофициальное и не связано с Nestlé.
