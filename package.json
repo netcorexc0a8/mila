@@ -1,0 +1,27 @@
+{
+  "name": "mozhno-malyshu",
+  "version": "1.0.0",
+  "description": "PWA для проверки банок детской смеси Nestlé по списку отозванных партий",
+  "scripts": {
+    "predev": "node scripts/copy-tesseract.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-tesseract.mjs",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.3",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^4.1.11"
+  },
+  "private": true,
+  "type": "module"
+}
