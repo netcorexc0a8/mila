@@ -8,7 +8,7 @@ export interface HistoryItem {
 }
 
 const KEY = 'mm.history.v1';
-const LIMIT = 100;
+const LIMIT = 500;
 
 export interface KeyValueStore {
   getItem(key: string): string | null;
@@ -43,6 +43,16 @@ export function addToHistory(item: HistoryItem, store = defaultStore()): History
     // Storage full or blocked: history is a convenience, the check itself still works.
   }
   return next;
+}
+
+/** Replace the whole history (used when restoring a backup). */
+export function saveHistory(items: HistoryItem[], store = defaultStore()): boolean {
+  try {
+    store?.setItem(KEY, JSON.stringify(items.slice(0, LIMIT)));
+    return !!store;
+  } catch {
+    return false;
+  }
 }
 
 export function clearHistory(store = defaultStore()): void {

@@ -40,7 +40,7 @@ export function openCamera(onFound: (r: ScanResult) => void): void {
     </section>`;
   document.body.appendChild(root);
   document.body.classList.add('no-scroll');
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#000000');
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', '#000000'));
 
   const video = root.querySelector('video')!;
   const hint = root.querySelector<HTMLElement>('.camera__hint')!;
@@ -64,7 +64,8 @@ export function openCamera(onFound: (r: ScanResult) => void): void {
     root.remove();
     document.body.classList.remove('no-scroll');
     window.removeEventListener('hashchange', close);
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f5f8fd');
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', bg));
   };
   window.addEventListener('hashchange', close);
   root.querySelector('.camera__close')!.addEventListener('click', close);

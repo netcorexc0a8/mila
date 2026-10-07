@@ -2,7 +2,8 @@ import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { DATA_CHECKED_AT, HOTLINE, NOT_AFFECTED, PRODUCTION_PERIOD, RECALLED_PRODUCTS, SOURCE_URL } from './data/recall';
 import { productInfo, UNKNOWN_PRODUCT, type ProductInfo } from './data/products';
-import { addToHistory, addToSession, clearHistory, loadHistory, loadSession, type HistoryItem } from './lib/history';
+import { addToHistory, addToSession, clearHistory, loadHistory, loadSession, saveHistory, type HistoryItem } from './lib/history';
+import { backupFileName, makeBackup, mergeHistory, parseBackup } from './lib/backup';
 import { checkLot, LOT_LENGTH, normalizeLot, type CheckResult } from './lib/lot';
 import { productionDateFromLot } from './lib/dates';
 import { openCamera, type ScanResult } from './camera';
@@ -13,6 +14,7 @@ import canScanUrl from './assets/can-scan.webp';
 const app = document.getElementById('app')!;
 const WELCOME_KEY = 'mm.welcomed.v1';
 const OFFLINE_SEEN_KEY = 'mm.offline-seen';
+const BACKUP_AT_KEY = 'mm.backup-at';
 const VERSION = __APP_VERSION__;
 
 registerSW({ immediate: true });
@@ -33,6 +35,47 @@ function formatTime(ts: number): string {
   if (d.toDateString() === new Date().toDateString()) return `Сегодня, ${time}`;
   if (d.toDateString() === new Date(Date.now() - 864e5).toDateString()) return `Вчера, ${time}`;
   return `${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).replace(' г.', '')}, ${time}`;
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+
+/** Hand the backup to the iOS share sheet (Save to Files, AirDrop…) or download it. */
+async function saveBackup(): Promise<string> {
+  const json = JSON.stringify(makeBackup(loadHistory()), null, 1);
+  const name = backupFileName();
+  const file = new File([json], name, { type: 'application/json' });
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'Можно малышу: резервная копия' });
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return '';
+      throw e;
+    }
+  } else {
+    const url = URL.createObjectURL(file);
+    const a = Object.assign(document.createElement('a'), { href: url, download: name });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  set(BACKUP_AT_KEY, String(Date.now()));
+  return 'Копия сохранена.';
+}
+
+async function restoreBackup(file: File): Promise<string> {
+  const restored = parseBackup(await file.text());
+  const { items, added } = mergeHistory(loadHistory(), restored);
+  if (!saveHistory(items)) throw new Error('Не удалось сохранить историю: память браузера недоступна.');
+  return added
+    ? `Восстановлено: ${added} ${plural(added, 'проверка', 'проверки', 'проверок')}.`
+    : 'Все проверки из копии уже есть в истории.';
 }
 
 function storage(kind: 'local' | 'session') {
@@ -69,8 +112,10 @@ function chip(tone: Tone): string {
   return `<span class="chip chip--${tone}">${CHIP[tone]}</span>`;
 }
 
-function setThemeColor(color: string): void {
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+/** Colour the iOS status bar area to match the screen; takes a CSS variable so it follows the light/dark theme. */
+function setThemeColor(cssVar: string): void {
+  const color = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
+  if (color) document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', color));
 }
 
 // ---------- layout ----------
@@ -196,7 +241,7 @@ function resultScreen(rawLot: string, p: ResultParams): string {
     session.length > 1 ? `<a class="link-quiet" href="#/session">Проверено банок: ${session.length}</a>` : '';
 
   if (result.status === 'recalled') {
-    setThemeColor('#fdeeee');
+    setThemeColor('--bad-bg');
     return page(
       `<section class="verdict">
         <div class="badge badge--bad">${icons.bang(44)}</div>
@@ -221,7 +266,7 @@ function resultScreen(rawLot: string, p: ResultParams): string {
   }
 
   if (result.status === 'similar') {
-    setThemeColor('#fff6e6');
+    setThemeColor('--warn-bg');
     return page(
       `<section class="verdict">
         <div class="badge badge--warn">${icons.question(44)}</div>
@@ -373,6 +418,21 @@ const ABOUT_PAGES: Record<string, { title: string; icon: string; sub?: string; b
           <div class="lots__grid">${p.lots.map((l) => `<a class="lotchip" href="#/check/${l}?view">${l}</a>`).join('')}</div></div>`;
       }).join('')}`,
   },
+  backup: {
+    title: 'Резервная копия',
+    sub: 'Сохранить и восстановить историю',
+    icon: icons.backup(22),
+    body: () => {
+      const n = loadHistory().length;
+      const last = get(BACKUP_AT_KEY);
+      return `<p>История проверок хранится только на этом телефоне. Сохраните копию в файл, чтобы не потерять её при смене телефона или очистке браузера.</p>
+      <p class="backup-stat"><b>${n}</b> ${plural(n, 'проверка', 'проверки', 'проверок')} в истории${last ? `<br/><span>Последняя копия: ${formatTime(Number(last))}</span>` : ''}</p>
+      <button class="btn btn--primary btn--block" data-action="backup-save" ${n ? '' : 'disabled'}>${icons.backup(22)} Сохранить копию</button>
+      <label class="btn btn--outline btn--block">Восстановить из файла<input type="file" accept="application/json,.json" data-backup-input hidden /></label>
+      <p class="backup-msg" data-backup-msg role="status"></p>
+      <p class="small">На iPhone выберите «Сохранить в Файлы» и iCloud Drive: копия будет доступна и на новом телефоне. При восстановлении проверки добавляются к текущей истории, повторы не дублируются.</p>`;
+    },
+  },
   privacy: {
     title: 'Политика конфиденциальности',
     icon: icons.privacy(22),
@@ -446,7 +506,7 @@ function render(): void {
   const hash = location.hash || '#/';
   const [path, query = ''] = hash.slice(1).split('?');
   const params = new URLSearchParams(query);
-  setThemeColor('#f5f8fd');
+  setThemeColor('--bg');
 
   if (!get(WELCOME_KEY) && path !== '/welcome' && !path.startsWith('/check/')) {
     location.replace('#/welcome');
@@ -517,11 +577,41 @@ app.addEventListener('click', (e) => {
         el.classList.add('shake');
       }
       break;
+    case 'backup-save':
+      saveBackup()
+        .then((msg) => {
+          if (msg) {
+            render();
+            showBackupMsg(msg, false);
+          }
+        })
+        .catch(() => showBackupMsg('Не удалось сохранить копию.', true));
+      break;
     case 'offline-continue':
       set(OFFLINE_SEEN_KEY, '1', 'session');
       render();
       break;
   }
+});
+
+function showBackupMsg(text: string, error: boolean): void {
+  const el = app.querySelector<HTMLElement>('[data-backup-msg]');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('is-error', error);
+}
+
+app.addEventListener('change', (e) => {
+  const input = e.target as HTMLInputElement;
+  if (!input.matches('[data-backup-input]')) return;
+  const file = input.files?.[0];
+  if (!file) return;
+  restoreBackup(file)
+    .then((msg) => {
+      render();
+      showBackupMsg(msg, false);
+    })
+    .catch((err: Error) => showBackupMsg(err.message || 'Не удалось прочитать файл.', true));
 });
 
 app.addEventListener('submit', (e) => {
@@ -555,6 +645,8 @@ app.addEventListener('input', (e) => {
 });
 
 window.addEventListener('hashchange', render);
+// Re-render when the phone switches between light and dark (e.g. automatic at sunset).
+window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', render);
 window.addEventListener('online', render);
 window.addEventListener('offline', () => {
   // Only interrupt with the offline screen at start-up, not in the middle of a check.

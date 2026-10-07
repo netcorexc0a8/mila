@@ -27,7 +27,47 @@
   --gutter: clamp(18px, 5.4vw, 26px);
   --tabbar-h: 64px;
   --font: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Nunito', sans-serif;
+  --outline: #bcd2f8;
+  --soft: #eef2f9;
+  --ok-panel: linear-gradient(180deg, #e3f5ee, #eef8f6 60%, #f1f6fd);
+  --ok-title: #14504a;
+  --tabbar-bg: rgb(255 255 255 / 92%);
+  --ring: #c9dbfa;
+  --art-bg: transparent;
   color-scheme: light;
+}
+
+/* Dark theme follows the phone's setting (iOS: Settings → Display & Brightness). */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1524;
+    --surface: #18223a;
+    --ink: #eaf0fb;
+    --ink-2: #aab7d3;
+    --muted: #7f8db0;
+    --line: #26324d;
+    --primary: #5b93f5;
+    --primary-2: #4a86f2;
+    --primary-soft: #1d2d52;
+    --ok: #3ccf8e;
+    --ok-bg: #0f2a22;
+    --ok-chip: #143829;
+    --bad: #ff6b72;
+    --bad-bg: #2d1418;
+    --bad-chip: #47202a;
+    --warn: #f5b443;
+    --warn-bg: #2c2210;
+    --warn-chip: #44331a;
+    --shadow: 0 8px 28px rgb(0 0 0 / 35%);
+    --outline: #34497a;
+    --soft: #1f2a44;
+    --ok-panel: linear-gradient(180deg, #11342a, #10261f 60%, #0e1524);
+    --ok-title: #b9f0d6;
+    --tabbar-bg: rgb(20 28 46 / 92%);
+    --ring: #2a3f6b;
+    --art-bg: #f4f1ec;
+    color-scheme: dark;
+  }
 }
 
 * {
@@ -142,7 +182,7 @@ button {
 .screen--bad .btn--outline,
 .screen--warn .btn--outline {
   color: var(--primary-2);
-  border-color: #bcd2f8;
+  border-color: var(--outline);
 }
 .btn--danger {
   background: linear-gradient(180deg, #f5525a, #e53640);
@@ -150,7 +190,7 @@ button {
   box-shadow: 0 10px 22px rgb(229 54 64 / 25%);
 }
 .btn--soft {
-  background: #eef2f9;
+  background: var(--soft);
   color: var(--ink);
 }
 
@@ -437,7 +477,7 @@ body:has(.screen--warn) {
 }
 
 .okpanel {
-  background: linear-gradient(180deg, #e3f5ee, #eef8f6 60%, #f1f6fd);
+  background: var(--ok-panel);
   border-radius: 28px;
   padding: 26px 18px 20px;
   display: flex;
@@ -481,7 +521,7 @@ body:has(.screen--warn) {
   line-height: 1.2;
 }
 .screen--ok .verdict__title {
-  color: #14504a;
+  color: var(--ok-title);
 }
 .screen--bad .verdict__title,
 .screen--bad .verdict__sub {
@@ -835,6 +875,30 @@ mark {
   text-decoration: none;
 }
 
+.backup-stat {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.backup-stat span {
+  font-size: 14px;
+  color: var(--muted);
+}
+.backup-msg {
+  min-height: 1.4em;
+  font-weight: 700;
+  color: var(--ok);
+  text-align: center;
+}
+.backup-msg.is-error {
+  color: var(--bad);
+}
+.btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 /* ---------- 10. Offline ---------- */
 
 .screen--offline {
@@ -883,7 +947,7 @@ mark {
   justify-content: space-around;
   height: calc(var(--tabbar-h) + var(--safe-b));
   padding: 8px 8px var(--safe-b);
-  background: rgb(255 255 255 / 92%);
+  background: var(--tabbar-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-top: 1px solid var(--line);
@@ -1109,7 +1173,7 @@ mark {
   stroke-width: 7;
 }
 .recog__track {
-  stroke: #c9dbfa;
+  stroke: var(--ring);
 }
 .recog__val {
   stroke: var(--primary);
@@ -1154,7 +1218,7 @@ mark {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  border: 2px solid #c9dbfa;
+  border: 2px solid var(--ring);
   color: transparent;
   transition: all 0.25s ease;
 }
@@ -1170,6 +1234,27 @@ mark {
   margin-top: 22px;
   color: var(--muted);
   font-size: 15px;
+}
+
+/* In the dark theme the illustration and can photo (light backgrounds) sit on rounded cards. */
+@media (prefers-color-scheme: dark) {
+  .welcome__art {
+    margin: 12px 0 18px;
+  }
+  .welcome__art img {
+    background: var(--art-bg);
+    border-radius: 28px;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .scan-hero img {
+    background: #fff;
+    border-radius: 14px;
+  }
+  .btn--primary,
+  .btn--danger {
+    box-shadow: none;
+  }
 }
 
 /* Small phones (iPhone 12 mini / SE): tighten vertical rhythm. */

@@ -36,6 +36,8 @@ export const icons = {
   source: (s = 22) => svg('<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><rect x="9.5" y="9" width="5" height="6" rx="2.5"/>', s),
   privacy: (s = 22) => svg('<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M10 12.5l1.6 1.6L14.5 11"/>', s),
   terms: (s = 22) => svg('<rect x="5" y="3.5" width="14" height="17" rx="3"/><path d="M12 8v5"/><circle cx="12" cy="16.3" r="1" fill="currentColor" stroke="none"/>', s),
+  backup: (s = 22) =>
+    svg('<path d="M7 18a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.4 1.5A3.8 3.8 0 0 1 17.5 18"/><path d="M12 12v8M9 15l3-3 3 3"/>', s),
   list: (s = 22) => svg('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h8M8 15h5"/>', s),
 };
 
@@ -111,8 +113,8 @@ export function canOutline(size = 72): string {
 /** Cloud with a slash for the offline screen. */
 export function offlineCloud(size = 110): string {
   return `<svg viewBox="0 0 120 100" width="${size}" height="${Math.round(size * 0.83)}" fill="none" aria-hidden="true">
-    <path d="M32 78h58a20 20 0 0 0 2-40 30 30 0 0 0-57-6A23 23 0 0 0 32 78z" fill="#e8effb" stroke="#6e86b5" stroke-width="4" stroke-linejoin="round"/>
-    <path d="M24 14l74 74" stroke="#6e86b5" stroke-width="4.5" stroke-linecap="round"/>
-    <path d="M27 11l74 74" stroke="#f5f8fd" stroke-width="3"/>
+    <path d="M32 78h58a20 20 0 0 0 2-40 30 30 0 0 0-57-6A23 23 0 0 0 32 78z" fill="var(--soft)" stroke="var(--muted)" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M24 14l74 74" stroke="var(--muted)" stroke-width="4.5" stroke-linecap="round"/>
+    <path d="M27 11l74 74" stroke="var(--bg)" stroke-width="3"/>
   </svg>`;
 }
