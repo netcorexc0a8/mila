@@ -1,13 +1,18 @@
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { DATA_CHECKED_AT, HOTLINE, NOT_AFFECTED, PRODUCTION_PERIOD, RECALLED_PRODUCTS, SOURCE_URL } from './data/recall';
-import { addToHistory, clearHistory, loadHistory, type HistoryItem } from './lib/history';
+import { productInfo, UNKNOWN_PRODUCT, type ProductInfo } from './data/products';
+import { addToHistory, addToSession, clearHistory, loadHistory, loadSession, type HistoryItem } from './lib/history';
 import { checkLot, LOT_LENGTH, normalizeLot, type CheckResult } from './lib/lot';
-import { openCamera } from './camera';
-import { can, canBottom, icons, logo } from './icons';
+import { productionDateFromLot } from './lib/dates';
+import { openCamera, type ScanResult } from './camera';
+import { can, icons, logo, offlineCloud } from './icons';
+import motherUrl from './assets/mother.webp';
+import canScanUrl from './assets/can-scan.webp';
 
 const app = document.getElementById('app')!;
 const WELCOME_KEY = 'mm.welcomed.v1';
+const OFFLINE_SEEN_KEY = 'mm.offline-seen';
 const VERSION = __APP_VERSION__;
 
 registerSW({ immediate: true });
@@ -18,335 +23,421 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
-function formatDate(iso: string): string {
+function longDate(iso: string): string {
   return new Date(iso + 'T00:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
-  const today = new Date();
-  const yesterday = new Date(Date.now() - 864e5);
   const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  if (d.toDateString() === today.toDateString()) return `Сегодня, ${time}`;
-  if (d.toDateString() === yesterday.toDateString()) return `Вчера, ${time}`;
-  return `${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}, ${time}`;
+  if (d.toDateString() === new Date().toDateString()) return `Сегодня, ${time}`;
+  if (d.toDateString() === new Date(Date.now() - 864e5).toDateString()) return `Вчера, ${time}`;
+  return `${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).replace(' г.', '')}, ${time}`;
 }
 
-function storageGet(key: string): string | null {
+function storage(kind: 'local' | 'session') {
   try {
-    return localStorage.getItem(key);
+    return kind === 'local' ? localStorage : sessionStorage;
   } catch {
     return null;
   }
 }
-function storageSet(key: string, value: string): void {
+const get = (k: string, kind: 'local' | 'session' = 'local') => storage(kind)?.getItem(k) ?? null;
+const set = (k: string, v: string, kind: 'local' | 'session' = 'local') => {
   try {
-    localStorage.setItem(key, value);
+    storage(kind)?.setItem(k, v);
   } catch {
     /* private mode */
   }
-}
+};
 
 function go(hash: string): void {
   if (location.hash === hash) render();
   else location.hash = hash;
 }
 
-const STATUS_LABEL: Record<HistoryItem['status'], string> = {
-  recalled: 'Отозвана',
-  similar: 'Проверьте',
-  'not-recalled': 'Нет в списке',
-};
-const STATUS_TONE = { recalled: 'bad', similar: 'warn', 'not-recalled': 'ok' } as const;
+/** Product shown for a check: known for recalled lots, generic otherwise. */
+function productFor(r: CheckResult): ProductInfo {
+  return r.status === 'recalled' || r.status === 'similar' ? productInfo(r.entry.product) : UNKNOWN_PRODUCT;
+}
+
+type Tone = 'ok' | 'bad' | 'warn';
+const TONE: Record<HistoryItem['status'], Tone> = { recalled: 'bad', similar: 'warn', 'not-recalled': 'ok' };
+const CHIP: Record<Tone, string> = { ok: 'В порядке', bad: 'Отозвана', warn: 'Проверьте' };
+
+function chip(tone: Tone): string {
+  return `<span class="chip chip--${tone}">${CHIP[tone]}</span>`;
+}
+
+function setThemeColor(color: string): void {
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color);
+}
 
 // ---------- layout ----------
 
 type Tab = 'scan' | 'history' | 'about' | null;
 
 function tabbar(active: Tab): string {
-  const item = (tab: Exclude<Tab, null>, href: string, icon: string, label: string) =>
-    `<a href="${href}" class="tab ${active === tab ? 'tab--active' : ''}" ${active === tab ? 'aria-current="page"' : ''}>${icon}<span>${label}</span></a>`;
+  const item = (tab: Exclude<Tab, null>, href: string, icon: string, iconActive: string, label: string) =>
+    `<a href="${href}" class="tab ${active === tab ? 'is-active' : ''}" ${active === tab ? 'aria-current="page"' : ''}>
+      ${active === tab ? iconActive : icon}<span>${label}</span></a>`;
   return `<nav class="tabbar" aria-label="Разделы">
-    ${item('scan', '#/', icons.scan(22), 'Проверка')}
-    ${item('history', '#/history', icons.history(22), 'История')}
-    ${item('about', '#/about', icons.info(22), 'О приложении')}
+    ${item('scan', '#/', icons.scan(26), icons.scan(26), 'Сканер')}
+    ${item('history', '#/history', icons.history(26), icons.clockFilled(26), 'История')}
+    ${item('about', '#/about', icons.info(26), icons.infoFilled(26), 'О приложении')}
   </nav>`;
 }
 
-function offlinePill(): string {
-  return navigator.onLine
-    ? ''
-    : `<div class="pill pill--offline" role="status">${icons.offline(16)} Нет интернета — проверка всё равно работает</div>`;
-}
-
 function page(content: string, tab: Tab, cls = ''): string {
-  return `<main class="screen ${cls}">${offlinePill()}${content}</main>${tab ? tabbar(tab) : ''}`;
+  return `<main class="screen ${cls} ${tab ? 'has-tabbar' : ''}">${content}</main>${tab ? tabbar(tab) : ''}`;
 }
 
-// ---------- screens ----------
+// ---------- 1. Welcome ----------
 
 function welcomeScreen(): string {
   return `<main class="screen screen--welcome">
-    <div class="welcome">
-      <div class="welcome__logo">${logo(120)}</div>
+    <div class="welcome__top">
+      ${logo(112)}
       <h1 class="brand">Можно<br/>малышу</h1>
-      <p class="lead">Проверьте детскую смесь перед покупкой</p>
-      <div class="welcome__card">
-        <p>Nestlé отозвала часть партий смесей NAN, NESTOGEN, PRENAN и ALFARÉ, выпущенных с ${PRODUCTION_PERIOD.from} по ${PRODUCTION_PERIOD.to}.</p>
-        <p>Введите или сфотографируйте номер партии с дна банки, и приложение скажет, есть ли он в списке отзыва.</p>
-      </div>
+      <p class="welcome__lead">Проверьте детское питание<br/>перед покупкой</p>
+    </div>
+    <div class="welcome__art">
+      <img src="${motherUrl}" alt="" width="1110" height="720" />
+    </div>
+    <div class="welcome__bottom">
       <button class="btn btn--primary btn--block" data-action="start">Начать</button>
-      <p class="muted small center">С заботой о вашем малыше 💙</p>
+      <p class="welcome__care">С заботой о вашем малыше <span class="heart">💙</span></p>
     </div>
   </main>`;
 }
 
-function recentList(items: HistoryItem[]): string {
-  if (!items.length) return '';
-  return `<section class="section">
-    <div class="section__head"><h2>Последние проверки</h2><a href="#/history" class="link">Все</a></div>
-    <ul class="list">${items.map(historyRow).join('')}</ul>
-  </section>`;
-}
+// ---------- 2. Home (scanner) ----------
 
 function homeScreen(): string {
   return page(
-    `<header class="topbar">
-      <div class="topbar__brand">${logo(36)}<span>Можно<br/>малышу</span></div>
-      <a href="#/about" class="icon-btn" aria-label="О приложении">${icons.info(22)}</a>
+    `<header class="appbar">
+      <div class="appbar__brand">${logo(40)}<span>Можно<br/>малышу</span></div>
+      <a href="#/about/how" class="icon-btn" aria-label="Как это работает">${icons.info(26)}</a>
     </header>
-    <h1 class="title">Проверьте детскую смесь перед покупкой</h1>
-    <p class="muted">Номер партии — 10 букв и цифр на дне банки, обычно рядом со сроком годности.</p>
-    <div class="hero">${canBottom()}</div>
-    <button class="btn btn--primary btn--block" data-action="camera">${icons.camera(20)} Сканировать номер камерой</button>
-    <form class="lot-form" data-form="lot" autocomplete="off">
-      <label for="lot" class="label">Или введите номер партии</label>
-      <div class="lot-form__row">
-        <input id="lot" name="lot" class="input input--mono" inputmode="text" autocapitalize="characters"
-          spellcheck="false" placeholder="например, 51510346AB" maxlength="24" enterkeyhint="go" />
-        <button class="btn btn--dark" type="submit">Проверить</button>
-      </div>
-      <p class="hint" data-hint></p>
-    </form>
-    ${recentList(loadHistory().slice(0, 3))}
-    <a href="#/about" class="btn btn--ghost btn--block">Как это работает?</a>`,
+    <h1 class="h1">Проверьте детскую смесь перед покупкой</h1>
+    <p class="sub">Наведите камеру на номер партии (LOT) на дне банки.</p>
+    <div class="scan-hero-wrap"><div class="scan-hero" aria-hidden="true">
+      <i></i><i></i><i></i><i></i>
+      <img src="${canScanUrl}" alt="" width="440" height="560" />
+    </div></div>
+    <div class="stack">
+      <button class="btn btn--primary btn--block" data-action="camera">${icons.camera(24)} Сканировать</button>
+      <a href="#/about/how" class="btn btn--outline btn--block">Как это работает?</a>
+      <a href="#/manual" class="link-quiet">Ввести номер партии вручную</a>
+    </div>`,
+    'scan',
+    'screen--home',
+  );
+}
+
+// ---------- manual entry ----------
+
+function manualScreen(prefill = ''): string {
+  return page(
+    `<header class="navbar">
+      <a href="#/" class="icon-btn icon-btn--ink" aria-label="Назад">${icons.back(24)}</a>
+      <h1 class="navbar__title">Номер партии</h1>
+    </header>
+    <form class="card manual" data-form="lot" autocomplete="off">
+      <label for="lot" class="label">Введите номер с дна банки</label>
+      <input id="lot" name="lot" class="input" inputmode="text" autocapitalize="characters" spellcheck="false"
+        placeholder="например, 51510346AB" maxlength="24" enterkeyhint="go" value="${esc(prefill)}" />
+      <p class="hint" data-hint>Номер партии — ${LOT_LENGTH} цифр и букв, часто после «L-» или «LOT».</p>
+      <button class="btn btn--primary btn--block" type="submit">Проверить</button>
+    </form>`,
     'scan',
   );
 }
 
-let lastOcr: { candidates: string[] } | null = null;
+// ---------- 5/6. Result ----------
 
-function resultScreen(rawLot: string, fromOcr: boolean, save: boolean): string {
+interface ResultParams {
+  fromOcr: boolean;
+  save: boolean;
+  exp?: string;
+  man?: string;
+}
+
+function resultScreen(rawLot: string, p: ResultParams): string {
   const result = checkLot(rawLot);
-  const others = fromOcr && lastOcr ? lastOcr.candidates.filter((c) => c !== normalizeLot(rawLot)) : [];
+  if (result.status === 'empty' || result.status === 'too-short') {
+    return manualScreen(result.status === 'too-short' ? result.input : '');
+  }
+  const product = productFor(result);
+  const lot = result.status === 'recalled' ? result.entry.lot : result.input;
 
-  if (save && (result.status === 'recalled' || result.status === 'similar' || result.status === 'not-recalled')) {
-    addToHistory({
-      ts: Date.now(),
-      lot: result.input,
-      status: result.status,
-      product: 'entry' in result ? `${result.entry.product.name} ${result.entry.product.weight}` : undefined,
-    });
+  if (p.save) {
+    const item: HistoryItem = { ts: Date.now(), lot: result.input, status: result.status };
+    addToHistory(item);
+    addToSession(item);
   }
 
-  const ocrNote = fromOcr
-    ? `<div class="note">${icons.camera(18)}<div>Номер распознан камерой. Сверьте его с банкой.
-         <button class="link" data-action="edit" data-lot="${esc(result.status === 'empty' ? '' : result.input)}">Исправить</button></div></div>
-       ${others.length ? `<div class="others">Также распознано: ${others.map((c) => `<a class="chip" href="#/check/${esc(c)}?ocr=1">${esc(c)}</a>`).join(' ')}</div>` : ''}`
+  const dateRow = p.exp
+    ? row('Срок годности', p.exp)
+    : (p.man ?? productionDateFromLot(lot))
+      ? row('Дата производства', (p.man ?? productionDateFromLot(lot))!)
+      : '';
+  const productCard = `<div class="pcard__head">
+      ${can(product === UNKNOWN_PRODUCT ? null : product, 92)}
+      <div><h2 class="pcard__title">${esc(product.title)}</h2><p class="pcard__desc">${esc(product.description)}</p></div>
+    </div>
+    <dl class="facts">${row('Партия (LOT)', lot, true)}${dateRow}</dl>`;
+
+  const ocrNote = p.fromOcr
+    ? `<p class="ocr-note">Номер распознан камерой, сверьте его с банкой. <button class="link" data-action="edit" data-lot="${esc(result.input)}">Исправить</button></p>`
     : '';
+  const session = loadSession();
+  const sessionLink =
+    session.length > 1 ? `<a class="link-quiet" href="#/session">Проверено банок: ${session.length}</a>` : '';
+
+  if (result.status === 'recalled') {
+    setThemeColor('#fdeeee');
+    return page(
+      `<section class="verdict">
+        <div class="badge badge--bad">${icons.bang(44)}</div>
+        <h1 class="verdict__title">Эта партия отозвана</h1>
+        <p class="verdict__sub">Не покупайте и не используйте<br/>этот продукт.</p>
+      </section>
+      <section class="card pcard">
+        ${productCard}
+        ${ocrNote}
+        <div class="alert">
+          ${icons.alertCircle(22)}
+          <p>Подробнее об отзыве и дальнейших действиях можно узнать на сайте Nestlé.
+          Горячая линия: <a href="tel:${HOTLINE.replace(/\s/g, '')}">${HOTLINE}</a>.</p>
+        </div>
+      </section>
+      <a class="btn btn--danger btn--block" href="${SOURCE_URL}" target="_blank" rel="noopener">Узнать больше</a>
+      <button class="btn btn--outline btn--block" data-action="camera">Проверить другую банку</button>
+      ${sessionLink}`,
+      'scan',
+      'screen--bad',
+    );
+  }
+
+  if (result.status === 'similar') {
+    setThemeColor('#fff6e6');
+    return page(
+      `<section class="verdict">
+        <div class="badge badge--warn">${icons.question(44)}</div>
+        <h1 class="verdict__title">Проверьте номер ещё раз</h1>
+        <p class="verdict__sub">Он отличается от отозванной партии<br/>${esc(result.entry.lot)} одним символом.</p>
+      </section>
+      <section class="card pcard">
+        ${productCard}
+        <div class="compare"><span>Отозвана партия</span><b>${diffMarkup(result.entry.lot, result.input)}</b></div>
+        <p class="small">Если на банке именно <b>${esc(result.entry.lot)}</b>, партия отозвана. Если номер введён верно, его нет в списке отзыва.</p>
+        ${ocrNote}
+      </section>
+      <button class="btn btn--primary btn--block" data-action="edit" data-lot="${esc(result.input)}">Исправить номер</button>
+      <button class="btn btn--outline btn--block" data-action="camera">Проверить другую банку</button>`,
+      'scan',
+      'screen--warn',
+    );
+  }
 
   return page(
-    `<header class="topbar topbar--plain">
-      <a href="#/" class="icon-btn" aria-label="Назад">${icons.back(22)}</a>
-      <span class="topbar__title">Результат проверки</span>
-      <span class="icon-btn" aria-hidden="true"></span>
-    </header>
-    ${resultCard(result)}
-    ${ocrNote}
-    <div class="actions">
-      <button class="btn btn--primary btn--block" data-action="camera">${icons.camera(20)} Проверить другую банку</button>
-      <a href="#/" class="btn btn--ghost btn--block">Ввести номер вручную</a>
-    </div>
-    <p class="muted small center">Список проверен ${formatDate(DATA_CHECKED_AT)} · <a class="link" href="${SOURCE_URL}" target="_blank" rel="noopener">источник Nestlé</a></p>`,
+    `<div class="okpanel">
+      <section class="verdict">
+        <div class="badge badge--ok">${icons.check(44)}</div>
+        <h1 class="verdict__title">Этот продукт<br/>не в списке отозванных<br/>партий</h1>
+      </section>
+      <section class="card pcard">
+        ${productCard}
+        ${ocrNote}
+      </section>
+      <p class="actual">Данные актуальны на ${longDate(DATA_CHECKED_AT)} ${icons.refresh(16)}</p>
+      <button class="btn btn--outline btn--block" data-action="camera">Проверить другую банку</button>
+      ${sessionLink}
+    </div>`,
     'scan',
-    `screen--result screen--${toneOf(result)}`,
+    'screen--ok',
   );
 }
 
-function toneOf(r: CheckResult): string {
-  switch (r.status) {
-    case 'recalled':
-      return 'bad';
-    case 'similar':
-      return 'warn';
-    case 'not-recalled':
-      return 'ok';
-    default:
-      return 'neutral';
-  }
+function row(label: string, value: string, mono = false): string {
+  return `<div><dt>${label}</dt><dd${mono ? ' class="mono"' : ''}>${esc(value)}</dd></div>`;
 }
 
-function lotRows(lot: string, product?: string): string {
-  return `<dl class="facts">
-    ${product ? `<div><dt>Продукт</dt><dd>${esc(product)}</dd></div>` : ''}
-    <div><dt>Партия (LOT)</dt><dd class="mono">${esc(lot)}</dd></div>
-  </dl>`;
-}
-
-function whatToDo(): string {
-  return `<div class="todo">
-    <h3>Что делать</h3>
-    <ul>
-      <li>Не давайте эту смесь ребёнку и не выбрасывайте банку: для возврата нужна оригинальная упаковка.</li>
-      <li>Верните её в магазин, где покупали, или в любой «Детский мир» (начислят бонусы).</li>
-      <li>Если ребёнок уже пил эту смесь и вас что-то беспокоит, обратитесь к педиатру.</li>
-    </ul>
-    <a class="btn btn--danger btn--block" href="tel:${HOTLINE.replace(/\s/g, '')}">${icons.phone(18)} Позвонить: ${HOTLINE}</a>
-    <a class="btn btn--ghost btn--block" href="${SOURCE_URL}" target="_blank" rel="noopener">Подробнее на сайте Nestlé ${icons.external(16)}</a>
-  </div>`;
-}
-
-function resultCard(r: CheckResult): string {
-  switch (r.status) {
-    case 'recalled': {
-      const p = r.entry.product;
-      return `<section class="verdict verdict--bad" role="alert">
-        <div class="verdict__badge">${icons.alert(40)}</div>
-        <h1>Эта партия отозвана</h1>
-        <p>Не покупайте и не используйте этот продукт.</p>
-      </section>
-      <section class="card">
-        <div class="card__product">${can('bad')}<div><b>${esc(p.name)}</b><span class="muted">${esc(p.weight)}</span></div></div>
-        ${lotRows(r.entry.lot)}
-        ${r.input !== r.entry.lot ? `<p class="small muted">Вы ввели ${esc(r.input)}, это совпадает с отозванной партией ${esc(r.entry.lot)} (похожие символы, например 0 и O, считаются одинаковыми).</p>` : ''}
-      </section>
-      ${whatToDo()}`;
-    }
-    case 'similar': {
-      const p = r.entry.product;
-      return `<section class="verdict verdict--warn" role="alert">
-        <div class="verdict__badge">${icons.question(40)}</div>
-        <h1>Проверьте номер ещё раз</h1>
-        <p>Он отличается от отозванной партии всего одним символом.</p>
-      </section>
-      <section class="card">
-        ${lotRows(r.input)}
-        <div class="compare">
-          <span class="muted small">Отозвана партия</span>
-          <span class="mono">${diffMarkup(r.entry.lot, r.input)}</span>
-          <span class="muted small">${esc(p.name)} ${esc(p.weight)}</span>
-        </div>
-        <p class="small">Если на банке именно <b class="mono">${esc(r.entry.lot)}</b>, партия отозвана. Если номер введён верно, его нет в списке отзыва.</p>
-        <button class="btn btn--ghost btn--block" data-action="edit" data-lot="${esc(r.input)}">Исправить номер</button>
-      </section>`;
-    }
-    case 'not-recalled':
-      return `<section class="verdict verdict--ok" role="status">
-        <div class="verdict__badge">${icons.check(40)}</div>
-        <h1>Этой партии нет в списке отозванных</h1>
-        <p>По данным Nestlé, отзыв её не касается.</p>
-      </section>
-      <section class="card">
-        ${lotRows(r.input)}
-        ${r.input.length !== LOT_LENGTH ? `<p class="small warn-text">Номер партии обычно состоит из ${LOT_LENGTH} символов, а у вас ${r.input.length}. Проверьте, что ввели только номер партии.</p>` : ''}
-        <p class="small muted">Отозваны только партии из официального списка. Все остальные партии, в том числе NAN 3 и NAN 4 OPTIPRO и NESTOGEN 1–4, можно использовать.</p>
-      </section>`;
-    case 'too-short':
-      return `<section class="verdict verdict--neutral">
-        <div class="verdict__badge">${icons.question(40)}</div>
-        <h1>Номер слишком короткий</h1>
-        <p>Номер партии состоит из ${LOT_LENGTH} символов, а введено ${r.input.length}: <span class="mono">${esc(r.input)}</span>.</p>
-      </section>
-      <button class="btn btn--ghost btn--block" data-action="edit" data-lot="${esc(r.input)}">Исправить номер</button>`;
-    case 'empty':
-      return `<section class="verdict verdict--neutral"><div class="verdict__badge">${icons.question(40)}</div><h1>Номер не введён</h1></section>`;
-  }
-}
-
-/** Highlight the differing character between the recalled lot and what was entered. */
 function diffMarkup(recalled: string, entered: string): string {
   return Array.from(recalled)
     .map((ch, i) => (ch === entered[i] ? esc(ch) : `<mark>${esc(ch)}</mark>`))
     .join('');
 }
 
+// ---------- 7. Session queue ----------
+
+function sessionScreen(): string {
+  const items = loadSession();
+  return page(
+    `<header class="navbar">
+      <a href="#/" class="icon-btn icon-btn--ink" aria-label="Назад">${icons.back(24)}</a>
+      <h1 class="navbar__title">Сканировать ещё</h1>
+    </header>
+    ${
+      items.length
+        ? `<ul class="list">${items
+            .map((h, i) => {
+              const r = checkLot(h.lot);
+              const tone = TONE[h.status];
+              return `<li><a class="qrow" href="#/check/${encodeURIComponent(h.lot)}?view">
+                <span class="dot dot--${tone}">${tone === 'ok' ? icons.check(14) : tone === 'bad' ? icons.bang(14) : icons.question(14)}</span>
+                ${can(r.status === 'recalled' || r.status === 'similar' ? productFor(r) : null, 54)}
+                <span class="qrow__body"><span>Банка ${i + 1}</span><span>${esc(productFor(r).title)}</span><span>Партия ${esc(h.lot)}</span></span>
+                ${chip(tone)}
+              </a></li>`;
+            })
+            .join('')}</ul>`
+        : `<p class="empty">Пока ни одной банки. Отсканируйте первую.</p>`
+    }
+    <div class="sticky-cta"><button class="btn btn--primary btn--block" data-action="camera">Сканировать ещё</button></div>`,
+    null,
+    'screen--session',
+  );
+}
+
+// ---------- 8. History ----------
+
 function historyRow(h: HistoryItem): string {
-  const tone = STATUS_TONE[h.status];
-  return `<li><a class="row" href="#/check/${encodeURIComponent(h.lot)}?view">
-    ${can(tone, 40)}
-    <div class="row__body">
-      <span class="muted small">${formatTime(h.ts)}</span>
-      <span class="mono">${esc(h.lot)}</span>
-      ${h.product ? `<span class="small">${esc(h.product)}</span>` : ''}
-    </div>
-    <span class="badge badge--${tone}">${STATUS_LABEL[h.status]}</span>
+  const r = checkLot(h.lot);
+  const product = productFor(r);
+  const tone = TONE[h.status];
+  return `<li><a class="hrow" href="#/check/${encodeURIComponent(h.lot)}?view">
+    ${can(r.status === 'recalled' || r.status === 'similar' ? product : null, 60)}
+    <span class="hrow__body">
+      <span class="hrow__time">${formatTime(h.ts)}</span>
+      <span class="hrow__meta"><span class="nowrap">${esc(product.title)}</span> <span class="sep">•</span> <span class="nowrap">Партия ${esc(h.lot)}</span></span>
+      ${chip(tone)}
+    </span>
+    <span class="hrow__chev">${icons.chevron(18)}</span>
   </a></li>`;
 }
 
 function historyScreen(): string {
   const items = loadHistory();
   return page(
-    `<header class="topbar topbar--plain"><span class="topbar__title topbar__title--left">История проверок</span></header>
+    `<h1 class="h2">История проверок</h1>
     ${
       items.length
         ? `<ul class="list">${items.map(historyRow).join('')}</ul>
-           <button class="btn btn--ghost btn--block" data-action="clear-history">Очистить историю</button>`
+           <button class="link-quiet" data-action="clear-history">Очистить историю</button>`
         : `<div class="empty">${icons.history(48)}<p>Здесь появятся проверенные банки.</p><a class="btn btn--primary" href="#/">Проверить банку</a></div>`
-    }
-    <p class="muted small center">История хранится только на этом устройстве.</p>`,
+    }`,
     'history',
   );
 }
 
-function aboutScreen(): string {
-  const total = RECALLED_PRODUCTS.reduce((n, p) => n + p.lots.length, 0);
-  return page(
-    `<header class="topbar topbar--plain"><span class="topbar__title topbar__title--left">О приложении</span></header>
-    <div class="about-head">${logo(72)}<h2>Можно малышу</h2><p class="muted">Проверьте детское питание перед покупкой</p><p class="muted small">Версия ${VERSION}</p></div>
+// ---------- 9. About ----------
 
-    <details class="acc" open>
-      <summary>Как это работает</summary>
-      <ol>
-        <li>Переверните банку и найдите номер партии: 10 букв и цифр, например <span class="mono">51510346AB</span>.</li>
-        <li>Наведите на него камеру или введите вручную.</li>
-        <li>Приложение сравнит номер со списком отозванных партий, опубликованным Nestlé.</li>
+const ABOUT_PAGES: Record<string, { title: string; icon: string; sub?: string; body: () => string }> = {
+  how: {
+    title: 'Как это работает',
+    icon: icons.how(22),
+    body: () => `<ol class="steps">
+        <li><b>Переверните банку.</b> На дне напечатаны номер партии, дата производства и срок годности.</li>
+        <li><b>Наведите камеру</b> так, чтобы строка с номером (обычно после «L-» или «LOT») попала в рамку. Банку можно держать и вверх ногами.</li>
+        <li><b>Сверьте результат.</b> Приложение сравнит номер со списком отозванных партий Nestlé. Список хранится на телефоне и работает без интернета.</li>
       </ol>
-      <p class="small muted">Штрихкод у всех партий одного продукта одинаковый, поэтому проверять нужно именно номер партии.</p>
-    </details>
+      <p class="small">Штрихкод у всех партий одного продукта одинаковый, поэтому проверять нужно именно номер партии.</p>`,
+  },
+  faq: {
+    title: 'Часто задаваемые вопросы',
+    icon: icons.faq(22),
+    body: () => `
+      <h3>Почему отзывают смесь?</h3>
+      <p>Nestlé отзывает партии в качестве меры предосторожности: у поставщика арахидоновой кислоты выявлен потенциальный риск наличия токсина цереулида. Отзываемые партии произведены с ${PRODUCTION_PERIOD.from} по ${PRODUCTION_PERIOD.to}.</p>
+      <h3>Каких продуктов это касается?</h3>
+      <p>Только партий из официального списка (${RECALLED_PRODUCTS.reduce((n, p) => n + p.lots.length, 0)} номеров). Не затронуты: ${NOT_AFFECTED.join('; ')}.</p>
+      <h3>Что делать, если партия отозвана?</h3>
+      <p>Не используйте смесь и сохраните упаковку. Верните её в магазин, где покупали, или в любой «Детский мир». Частные лица могут вернуть до 20 упаковок. Горячая линия Nestlé: <a href="tel:${HOTLINE.replace(/\s/g, '')}">${HOTLINE}</a> (круглосуточно).</p>
+      <h3>Ребёнок уже пил смесь из отозванной партии</h3>
+      <p>Если вас что-то беспокоит в самочувствии ребёнка, обратитесь к педиатру.</p>
+      <h3>Камера не распознаёт номер</h3>
+      <p>Наклоните банку, чтобы убрать блики, и поднесите телефон ближе. Если не получается, введите номер вручную.</p>`,
+  },
+  source: {
+    title: 'Источник данных',
+    sub: 'Официальная информация Nestlé',
+    icon: icons.source(22),
+    body: () => `<p>Список отозванных партий взят с официальной страницы Nestlé Россия и проверен ${longDate(DATA_CHECKED_AT)}.</p>
+      <a class="btn btn--outline btn--block" href="${SOURCE_URL}" target="_blank" rel="noopener">Открыть страницу Nestlé</a>
+      <h3>Все отозванные партии</h3>
+      ${RECALLED_PRODUCTS.map((p) => {
+        const info = productInfo(p);
+        return `<div class="lots"><h4>${esc(info.title)} <span>${esc(p.weight)}</span></h4>
+          <div class="lots__grid">${p.lots.map((l) => `<a class="lotchip" href="#/check/${l}?view">${l}</a>`).join('')}</div></div>`;
+      }).join('')}`,
+  },
+  privacy: {
+    title: 'Политика конфиденциальности',
+    icon: icons.privacy(22),
+    body: () => `<p>Приложение не собирает и не отправляет никаких данных. Изображение с камеры обрабатывается только на вашем телефоне и нигде не сохраняется.</p>
+      <p>История проверок хранится в памяти браузера на этом устройстве. Её можно очистить в разделе «История».</p>`,
+  },
+  terms: {
+    title: 'Условия использования',
+    icon: icons.terms(22),
+    body: () => `<p>«Можно малышу» — неофициальное приложение, не связанное с Nestlé. Оно сравнивает номер партии с опубликованным Nestlé списком отозванных партий.</p>
+      <p>Распознавание номера может ошибаться, поэтому всегда сверяйте номер на экране с номером на банке. Если сомневаетесь, позвоните на горячую линию Nestlé ${HOTLINE}.</p>`,
+  },
+};
 
-    <details class="acc">
-      <summary>Почему отзывают смесь</summary>
-      <p>Nestlé отзывает партии в качестве меры предосторожности: у поставщика одного из ингредиентов (арахидоновой кислоты) выявлен потенциальный риск наличия токсина цереулида. Отзываемые партии произведены с ${PRODUCTION_PERIOD.from} по ${PRODUCTION_PERIOD.to}.</p>
-    </details>
-
-    <details class="acc">
-      <summary>Список отозванных партий (${total})</summary>
-      ${RECALLED_PRODUCTS.map(
-        (p) => `<div class="lots"><h4>${esc(p.name)} <span class="muted">${esc(p.weight)}</span></h4>
-          <div class="lots__grid">${p.lots.map((l) => `<a class="chip mono" href="#/check/${l}?view">${l}</a>`).join('')}</div></div>`,
-      ).join('')}
-      <p class="small muted">Не затронуты: ${NOT_AFFECTED.join('; ')}.</p>
-    </details>
-
-    <details class="acc">
-      <summary>Что делать, если партия отозвана</summary>
-      <ul>
-        <li>Сохраните оригинальную упаковку: без неё возврат невозможен.</li>
-        <li>Верните банку в магазин, где покупали, или в любой «Детский мир».</li>
-        <li>Или отправьте упаковку Почтой России, адрес указан на сайте Nestlé.</li>
-        <li>Частные лица могут вернуть до 20 упаковок.</li>
-      </ul>
-      <a class="btn btn--ghost btn--block" href="tel:${HOTLINE.replace(/\s/g, '')}">${icons.phone(18)} ${HOTLINE} (круглосуточно)</a>
-    </details>
-
-    <a class="row row--link" href="${SOURCE_URL}" target="_blank" rel="noopener">
-      ${icons.info(20)}<div class="row__body"><span>Источник данных</span><span class="muted small">Официальная страница Nestlé</span></div>${icons.external(18)}
-    </a>
-
-    <p class="small muted">Приложение неофициальное и не связано с Nestlé. Оно работает без интернета: список партий хранится на устройстве. Данные о партиях проверены ${formatDate(DATA_CHECKED_AT)}. Если сомневаетесь, позвоните на горячую линию Nestlé.</p>
-    <p class="small muted">Приложение ничего не отправляет на сервер. Фото с камеры обрабатываются на телефоне.</p>`,
+function aboutScreen(): string {
+  return page(
+    `<h1 class="h2">О приложении</h1>
+    <div class="about-head">
+      ${logo(84)}
+      <h2>Можно малышу</h2>
+      <p>Проверяйте детское питание<br/>перед покупкой</p>
+      <span class="version">Версия ${VERSION}</span>
+    </div>
+    <ul class="group">
+      ${Object.entries(ABOUT_PAGES)
+        .map(
+          ([key, p]) => `<li><a href="#/about/${key}">
+            <span class="group__icon">${p.icon}</span>
+            <span class="group__text"><span>${p.title}</span>${p.sub ? `<small>${p.sub}</small>` : ''}</span>
+            ${icons.chevron(18)}</a></li>`,
+        )
+        .join('')}
+    </ul>
+    <p class="about-foot">Данные об отзыве обновлены:<br/>${longDate(DATA_CHECKED_AT).replace(' г.', '')}</p>`,
     'about',
   );
+}
+
+function aboutPage(key: string): string {
+  const p = ABOUT_PAGES[key];
+  if (!p) return aboutScreen();
+  return page(
+    `<header class="navbar">
+      <a href="#/about" class="icon-btn icon-btn--ink" aria-label="Назад">${icons.back(24)}</a>
+      <h1 class="navbar__title">${p.title}</h1>
+    </header>
+    <article class="card prose">${p.body()}</article>`,
+    'about',
+  );
+}
+
+// ---------- 10. Offline ----------
+
+function offlineScreen(): string {
+  return `<main class="screen screen--offline">
+    <div class="offline">
+      ${offlineCloud(120)}
+      <h1>Нет интернета</h1>
+      <p>Проверка возможна в офлайн-режиме.<br/>Данные об отозванных партиях<br/>загружены на устройство.</p>
+    </div>
+    <div class="stack">
+      <button class="btn btn--primary btn--block" data-action="retry">Попробовать ещё раз</button>
+      <button class="btn btn--soft btn--block" data-action="offline-continue">Продолжить офлайн</button>
+    </div>
+  </main>`;
 }
 
 // ---------- router ----------
@@ -355,27 +446,45 @@ function render(): void {
   const hash = location.hash || '#/';
   const [path, query = ''] = hash.slice(1).split('?');
   const params = new URLSearchParams(query);
+  setThemeColor('#f5f8fd');
 
-  if (!storageGet(WELCOME_KEY) && path !== '/welcome' && !path.startsWith('/check/')) {
+  if (!get(WELCOME_KEY) && path !== '/welcome' && !path.startsWith('/check/')) {
     location.replace('#/welcome');
+    return;
+  }
+  if (!navigator.onLine && !get(OFFLINE_SEEN_KEY, 'session') && path !== '/welcome') {
+    app.innerHTML = offlineScreen();
     return;
   }
 
   if (path === '/welcome') app.innerHTML = welcomeScreen();
   else if (path === '/history') app.innerHTML = historyScreen();
+  else if (path === '/session') app.innerHTML = sessionScreen();
+  else if (path === '/manual') app.innerHTML = manualScreen(params.get('lot') ?? '');
   else if (path === '/about') app.innerHTML = aboutScreen();
-  else if (path.startsWith('/check/')) app.innerHTML = resultScreen(decodeURIComponent(path.slice(7)), params.has('ocr'), !params.has('view'));
+  else if (path.startsWith('/about/')) app.innerHTML = aboutPage(path.slice(7));
+  else if (path.startsWith('/check/'))
+    app.innerHTML = resultScreen(decodeURIComponent(path.slice(7)), {
+      fromOcr: params.has('ocr'),
+      save: !params.has('view'),
+      exp: params.get('exp') ?? undefined,
+      man: params.get('man') ?? undefined,
+    });
   else app.innerHTML = homeScreen();
 
   window.scrollTo(0, 0);
-  const prefill = params.get('edit');
-  if (prefill !== null) {
-    const input = app.querySelector<HTMLInputElement>('#lot');
-    if (input) {
-      input.value = prefill;
-      input.focus();
-    }
-  }
+  const input = app.querySelector<HTMLInputElement>('#lot');
+  if (input && params.has('lot')) input.focus();
+}
+
+function startCamera(): void {
+  openCamera((r: ScanResult) => {
+    const q = new URLSearchParams({ ocr: '1' });
+    if (r.dates.exp) q.set('exp', r.dates.exp);
+    if (r.dates.man) q.set('man', r.dates.man);
+    // Replace the current entry so "back" from the result goes home, not to the previous can.
+    location.hash = `#/check/${encodeURIComponent(r.lots[0])}?${q}`;
+  });
 }
 
 app.addEventListener('click', (e) => {
@@ -383,23 +492,34 @@ app.addEventListener('click', (e) => {
   if (!el) return;
   switch (el.dataset.action) {
     case 'start':
-      storageSet(WELCOME_KEY, '1');
+      set(WELCOME_KEY, '1');
       go('#/');
       break;
     case 'camera':
-      openCamera((candidates) => {
-        lastOcr = { candidates };
-        go(`#/check/${encodeURIComponent(candidates[0])}?ocr=1`);
-      });
+      startCamera();
       break;
     case 'edit':
-      go(`#/?edit=${encodeURIComponent(el.dataset.lot ?? '')}`);
+      go(`#/manual?lot=${encodeURIComponent(el.dataset.lot ?? '')}`);
       break;
     case 'clear-history':
       if (confirm('Очистить историю проверок?')) {
         clearHistory();
         render();
       }
+      break;
+    case 'retry':
+      if (navigator.onLine) {
+        set(OFFLINE_SEEN_KEY, '1', 'session');
+        render();
+      } else {
+        el.classList.remove('shake');
+        void el.offsetWidth;
+        el.classList.add('shake');
+      }
+      break;
+    case 'offline-continue':
+      set(OFFLINE_SEEN_KEY, '1', 'session');
+      render();
       break;
   }
 });
@@ -411,17 +531,15 @@ app.addEventListener('submit', (e) => {
   const input = form.querySelector<HTMLInputElement>('#lot')!;
   const lot = normalizeLot(input.value);
   const hint = form.querySelector<HTMLElement>('[data-hint]')!;
-  if (!lot) {
-    hint.textContent = 'Введите номер партии с дна банки.';
-    input.focus();
-    return;
-  }
   if (lot.length < LOT_LENGTH) {
-    hint.textContent = `Номер партии состоит из ${LOT_LENGTH} символов, введено ${lot.length}.`;
+    hint.textContent = lot
+      ? `Номер партии состоит из ${LOT_LENGTH} символов, введено ${lot.length}.`
+      : 'Введите номер партии с дна банки.';
+    hint.classList.add('hint--warn');
     input.focus();
     return;
   }
-  lastOcr = null;
+  input.blur();
   go(`#/check/${encodeURIComponent(lot)}`);
 });
 
@@ -430,10 +548,16 @@ app.addEventListener('input', (e) => {
   if (input.id !== 'lot') return;
   const hint = app.querySelector<HTMLElement>('[data-hint]');
   const n = normalizeLot(input.value).length;
-  if (hint) hint.textContent = n ? `${n} из ${LOT_LENGTH} символов` : '';
+  if (hint) {
+    hint.classList.remove('hint--warn');
+    hint.textContent = n ? `${n} из ${LOT_LENGTH} символов` : `Номер партии — ${LOT_LENGTH} цифр и букв.`;
+  }
 });
 
 window.addEventListener('hashchange', render);
 window.addEventListener('online', render);
-window.addEventListener('offline', render);
+window.addEventListener('offline', () => {
+  // Only interrupt with the offline screen at start-up, not in the middle of a check.
+  set(OFFLINE_SEEN_KEY, '1', 'session');
+});
 render();

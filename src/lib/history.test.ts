@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addToHistory, clearHistory, loadHistory, type KeyValueStore } from './history';
+import { addToHistory, addToSession, clearHistory, loadHistory, loadSession, type KeyValueStore } from './history';
 
 function memoryStore(): KeyValueStore {
   const m = new Map<string, string>();
@@ -34,5 +34,16 @@ describe('history', () => {
 
   it('works without storage', () => {
     expect(loadHistory(null)).toEqual([]);
+  });
+});
+
+describe('session', () => {
+  it('keeps scan order and ignores an immediate repeat', () => {
+    const s = memoryStore();
+    addToSession({ ts: 1, lot: 'A', status: 'not-recalled' }, s);
+    addToSession({ ts: 2, lot: 'A', status: 'not-recalled' }, s);
+    addToSession({ ts: 3, lot: 'B', status: 'recalled' }, s);
+    addToSession({ ts: 4, lot: 'A', status: 'not-recalled' }, s);
+    expect(loadSession(s).map((h) => h.lot)).toEqual(['A', 'B', 'A']);
   });
 });

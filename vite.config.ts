@@ -21,8 +21,8 @@ export default defineConfig({
         scope: '.',
         display: 'standalone',
         orientation: 'portrait',
-        background_color: '#f4f7fd',
-        theme_color: '#2f6fe4',
+        background_color: '#f5f8fd',
+        theme_color: '#f5f8fd',
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -31,7 +31,7 @@ export default defineConfig({
       },
       workbox: {
         // The app shell and recall list are precached, so checking works offline from the first visit.
-        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,webp,webmanifest}'],
         globIgnores: ['tesseract/**'],
         navigateFallback: 'index.html',
         // The OCR engine (~7 MB) is cached on first camera use, not on install.

@@ -1,63 +1,118 @@
-// Inline SVG icons (no external icon font, works offline).
+// Inline SVG icons and illustrations (no icon font, works offline).
+import type { CanTone, ProductInfo } from './data/products';
+import canNanUrl from './assets/can-nan.webp';
+
 const svg = (body: string, size = 24, extra = '') =>
   `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${body}</svg>`;
 
 export const icons = {
-  scan: (s?: number) =>
-    svg('<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/>', s),
-  history: (s?: number) => svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', s),
-  info: (s?: number) => svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>', s),
-  camera: (s?: number) =>
-    svg('<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>', s),
-  close: (s?: number) => svg('<path d="M6 6l12 12M18 6L6 18"/>', s),
-  back: (s?: number) => svg('<path d="M15 5l-7 7 7 7"/>', s),
-  check: (s?: number) => svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', s, 'stroke-width="3"'),
-  alert: (s?: number) => svg('<path d="M12 6v7M12 17h.01"/>', s, 'stroke-width="3"'),
-  question: (s?: number) => svg('<path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/>', s, 'stroke-width="2.6"'),
-  flash: (s?: number) => svg('<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>', s),
-  image: (s?: number) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>', s),
-  phone: (s?: number) =>
+  scan: (s = 24) =>
+    svg('<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/>', s),
+  history: (s = 24) => svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', s),
+  info: (s = 24) => svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="1" fill="currentColor" stroke="none"/>', s),
+  infoFilled: (s = 24) =>
+    `<svg viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 11v5.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1.3" fill="#fff"/></svg>`,
+  clockFilled: (s = 24) =>
+    `<svg viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 7v5l3.2 2" stroke="#fff" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg>`,
+  camera: (s = 24) =>
+    `<svg viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true"><path d="M4 7.5h3l1.6-2.4a1.5 1.5 0 0 1 1.2-.6h4.4a1.5 1.5 0 0 1 1.2.6L17 7.5h3a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 18V9A1.5 1.5 0 0 1 4 7.5z" fill="currentColor"/><circle cx="12" cy="13.2" r="3.6" fill="none" stroke="var(--primary)" stroke-width="2"/><circle cx="18" cy="10.2" r=".9" fill="var(--primary)"/></svg>`,
+  close: (s = 24) => svg('<path d="M6 6l12 12M18 6L6 18"/>', s, 'stroke-width="2.4"'),
+  back: (s = 24) => svg('<path d="M15 5l-7 7 7 7"/>', s, 'stroke-width="2.4"'),
+  chevron: (s = 18) => svg('<path d="M9 6l6 6-6 6"/>', s),
+  check: (s = 24) => svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', s, 'stroke-width="3"'),
+  bang: (s = 24) => svg('<path d="M12 5.5v8"/><circle cx="12" cy="18" r="1.2" fill="currentColor" stroke="none"/>', s, 'stroke-width="3.2"'),
+  question: (s = 24) =>
+    svg('<path d="M9.2 9.2a2.8 2.8 0 1 1 3.9 2.6c-.7.3-1.1 1-1.1 1.7v.8"/><circle cx="12" cy="17.6" r="1.1" fill="currentColor" stroke="none"/>', s, 'stroke-width="2.6"'),
+  flash: (s = 24) => svg('<path d="M13 2.5L5 13.5h6l-1 8 8-11h-6z"/>', s),
+  image: (s = 24) => svg('<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>', s),
+  refresh: (s = 16) => svg('<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/>', s),
+  phone: (s = 18) =>
     svg('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>', s),
-  external: (s?: number) => svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>', s),
-  chevron: (s?: number) => svg('<path d="M9 6l6 6-6 6"/>', s),
-  offline: (s?: number) => svg('<path d="M3 3l18 18M8.5 8.6A5 5 0 0 0 6 13H5.5a3.5 3.5 0 0 0 0 7H17M20.6 18.5A3.5 3.5 0 0 0 18 13h-.3A6 6 0 0 0 10.3 7.2"/>', s),
+  alertCircle: (s = 22) => svg('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.4" r="1" fill="currentColor" stroke="none"/>', s),
+  // About list icons (outlined, like the mockup)
+  how: (s = 22) => svg('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><circle cx="12" cy="16.4" r="1" fill="currentColor" stroke="none"/>', s),
+  faq: (s = 22) =>
+    svg('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.6a2.4 2.4 0 1 1 3.4 2.2c-.6.3-1 .8-1 1.5v.4"/><circle cx="12" cy="16.6" r="1" fill="currentColor" stroke="none"/>', s),
+  source: (s = 22) => svg('<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><rect x="9.5" y="9" width="5" height="6" rx="2.5"/>', s),
+  privacy: (s = 22) => svg('<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M10 12.5l1.6 1.6L14.5 11"/>', s),
+  terms: (s = 22) => svg('<rect x="5" y="3.5" width="14" height="17" rx="3"/><path d="M12 8v5"/><circle cx="12" cy="16.3" r="1" fill="currentColor" stroke="none"/>', s),
+  list: (s = 22) => svg('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h8M8 15h5"/>', s),
 };
 
-/** App logo: a baby face in a crescent with a heart. */
+/** App logo: a mother's face in a blue crescent with a pink heart (as in the mockup). */
 export function logo(size = 96): string {
-  return `<svg viewBox="0 0 120 120" width="${size}" height="${size}" aria-hidden="true">
-    <circle cx="60" cy="60" r="56" fill="var(--logo-bg)"/>
-    <circle cx="56" cy="62" r="34" fill="#fff"/>
-    <path d="M30 50c4-16 20-26 36-24-8 4-12 12-12 12" fill="none" stroke="var(--primary)" stroke-width="5" stroke-linecap="round"/>
-    <circle cx="46" cy="62" r="3.6" fill="#22325a"/>
-    <circle cx="64" cy="62" r="3.6" fill="#22325a"/>
-    <path d="M47 74c5 5 12 5 17 0" fill="none" stroke="#22325a" stroke-width="3.4" stroke-linecap="round"/>
-    <circle cx="40" cy="71" r="4" fill="#ffb3c1" opacity=".8"/>
-    <circle cx="71" cy="71" r="4" fill="#ffb3c1" opacity=".8"/>
-    <path d="M88 38c-4-7-15-4-13 4 1 5 13 12 13 12s12-7 13-12c2-8-9-11-13-4z" fill="#ff7a93"/>
+  return `<svg viewBox="0 0 120 120" width="${size}" height="${size}" aria-hidden="true" class="logo">
+    <defs>
+      <linearGradient id="lg-moon" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#6c9cf2"/><stop offset="1" stop-color="#3f78e6"/>
+      </linearGradient>
+      <linearGradient id="lg-heart" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#ffb0bd"/><stop offset="1" stop-color="#f27d93"/>
+      </linearGradient>
+    </defs>
+    <circle cx="56" cy="62" r="50" fill="url(#lg-moon)"/>
+    <path d="M38 40c10-14 32-18 48-8 10 7 15 18 15 30 0 22-18 40-40 40-16 0-28-9-33-22z" fill="#fff"/>
+    <path d="M30 44c8-18 30-26 50-18 9 4 15 11 18 19-12-9-30-12-46-4-8 4-15 10-20 18-2-5-3-10-2-15z" fill="url(#lg-moon)"/>
+    <path d="M52 66q4 3 8 0" stroke="#3f6fd8" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M70 66q4 3 8 0" stroke="#3f6fd8" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M60 80q6 5 12 0" stroke="#3f6fd8" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <circle cx="51" cy="74" r="4" fill="#ffc7d1" opacity=".8"/>
+    <path d="M100 56c-5-9-20-6-18 5 1 7 18 18 18 18s17-11 18-18c2-11-13-14-18-5z" fill="url(#lg-heart)" stroke="#fff" stroke-width="2.5"/>
   </svg>`;
 }
 
-/** A formula can; tinted by check status. */
-export function can(tone: 'ok' | 'bad' | 'warn' | 'neutral' = 'neutral', size = 56): string {
-  return `<svg viewBox="0 0 64 64" width="${size}" height="${size}" aria-hidden="true" class="can can--${tone}">
-    <ellipse cx="32" cy="12" rx="20" ry="6" fill="var(--can-top)"/>
-    <path d="M12 12v40c0 3.3 9 6 20 6s20-2.7 20-6V12c0 3.3-9 6-20 6s-20-2.7-20-6z" fill="var(--can-body)"/>
-    <path d="M12 26c0 3.3 9 6 20 6s20-2.7 20-6v14c0 3.3-9 6-20 6s-20-2.7-20-6z" fill="var(--can-band)"/>
-    <text x="32" y="42" text-anchor="middle" font-size="10" font-weight="800" fill="#fff" font-family="system-ui,sans-serif">LOT</text>
+const TONES: Record<CanTone, [string, string]> = {
+  blue: ['#2f6fd0', '#8fb6ef'],
+  teal: ['#1f8a8a', '#86cfc9'],
+  green: ['#2e9a5c', '#9ad3ac'],
+  gold: ['#b58a2b', '#e7cf8c'],
+  purple: ['#6b4fb8', '#b9a8ea'],
+};
+
+let canSeq = 0;
+
+/** Formula can art. NAN 2 uses the can picture from the mockup; other products get a drawn can in their line colour. */
+export function can(product: ProductInfo | null, size = 64): string {
+  if (product?.brand === 'NAN' && product.stage === '2') {
+    return `<img class="can-img" src="${canNanUrl}" width="${Math.round(size * 0.77)}" height="${size}" alt="" />`;
+  }
+  const [dark, light] = TONES[product?.tone ?? 'blue'];
+  const id = `cg${++canSeq}`;
+  const brand = product?.brand ?? '';
+  const stage = product?.stage ?? '';
+  return `<svg viewBox="0 0 50 64" width="${Math.round(size * 0.78)}" height="${size}" aria-hidden="true" class="can-img">
+    <defs>
+      <linearGradient id="${id}" x1="0" x2="1">
+        <stop offset="0" stop-color="${dark}"/><stop offset=".35" stop-color="${light}"/><stop offset=".55" stop-color="#fff"/><stop offset="1" stop-color="${dark}"/>
+      </linearGradient>
+      <linearGradient id="${id}w" x1="0" x2="1">
+        <stop offset="0" stop-color="#dfe8f5"/><stop offset=".5" stop-color="#fff"/><stop offset="1" stop-color="#d4deed"/>
+      </linearGradient>
+    </defs>
+    <rect x="4" y="5" width="42" height="56" rx="5" fill="url(#${id}w)"/>
+    <rect x="4" y="5" width="42" height="10" rx="4" fill="url(#${id})"/>
+    <rect x="4" y="52" width="42" height="9" rx="4" fill="url(#${id})"/>
+    <ellipse cx="25" cy="5.5" rx="21" ry="3.2" fill="#c9d4e4"/>
+    ${brand ? `<text x="25" y="${stage ? 29 : 36}" text-anchor="middle" font-size="${brand.length > 4 ? 6.5 : 11}" font-weight="800" fill="${dark}" font-family="system-ui,sans-serif">${brand}</text>` : `<circle cx="25" cy="32" r="9" fill="none" stroke="${light}" stroke-width="2"/>`}
+    ${stage ? `<text x="25" y="47" text-anchor="middle" font-size="16" font-weight="800" fill="${dark}" font-family="system-ui,sans-serif">${stage}</text>` : ''}
   </svg>`;
 }
 
-/** Bottom of a can with the batch number highlighted: shows users where to look. */
-export function canBottom(): string {
-  return `<svg viewBox="0 0 240 150" class="can-bottom" role="img" aria-label="Номер партии на дне банки">
-    <ellipse cx="120" cy="75" rx="112" ry="68" fill="var(--surface-2)" stroke="var(--line)" stroke-width="3"/>
-    <ellipse cx="120" cy="75" rx="96" ry="56" fill="none" stroke="var(--line)" stroke-width="2"/>
-    <g font-family="ui-monospace,Menlo,monospace" font-size="14" fill="var(--muted)" letter-spacing="1">
-      <text x="120" y="56" text-anchor="middle">EXP 06.2027</text>
-      <text x="120" y="104" text-anchor="middle">12:45</text>
-    </g>
-    <rect x="44" y="66" width="152" height="26" rx="6" fill="var(--primary-soft)" stroke="var(--primary)" stroke-width="2.5"/>
-    <text x="120" y="84.5" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="16" font-weight="700" fill="var(--primary-ink)" letter-spacing="1.5">51510346AB</text>
+/** Outline can used on the recognition screen. */
+export function canOutline(size = 72): string {
+  return `<svg viewBox="0 0 64 72" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linejoin="round" aria-hidden="true">
+    <ellipse cx="32" cy="12" rx="20" ry="6"/>
+    <path d="M12 12v46c0 3.3 9 6 20 6s20-2.7 20-6V12"/>
+    <path d="M12 20c0 3.3 9 6 20 6s20-2.7 20-6"/>
+    <path d="M20 38c0-3 2-5 4-5" stroke-width="2.6" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/** Cloud with a slash for the offline screen. */
+export function offlineCloud(size = 110): string {
+  return `<svg viewBox="0 0 120 100" width="${size}" height="${Math.round(size * 0.83)}" fill="none" aria-hidden="true">
+    <path d="M32 78h58a20 20 0 0 0 2-40 30 30 0 0 0-57-6A23 23 0 0 0 32 78z" fill="#e8effb" stroke="#6e86b5" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M24 14l74 74" stroke="#6e86b5" stroke-width="4.5" stroke-linecap="round"/>
+    <path d="M27 11l74 74" stroke="#f5f8fd" stroke-width="3"/>
   </svg>`;
 }
