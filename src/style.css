@@ -1042,6 +1042,39 @@ mark {
   transform: scale(0.93);
 }
 
+.camera__status {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(31% - 40px);
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  text-shadow: 0 1px 4px rgb(0 0 0 / 70%);
+}
+.camera__laser {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 10%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #5b9bff, transparent);
+  box-shadow: 0 0 10px #5b9bff;
+  animation: laser 2.2s ease-in-out infinite alternate;
+}
+@keyframes laser {
+  to {
+    top: 88%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .camera__laser {
+    animation: none;
+    top: 50%;
+  }
+}
+
 /* ---------- 4. Recognition ---------- */
 
 .recog {

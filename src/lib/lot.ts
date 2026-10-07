@@ -195,4 +195,31 @@ export function hasConsensus(reads: string[][]): boolean {
   return reads.some((r) => r.some((c) => checkLot(c).status === 'recalled'));
 }
 
+/**
+ * Tracks codes seen across live camera frames. A code counts as stable once
+ * it has been read in `needed` of the last `window` frames, which filters out
+ * one-off misreads while the phone is still moving.
+ */
+export class FrameVotes {
+  private frames: string[][] = [];
+  constructor(
+    private readonly needed = 2,
+    private readonly window = 4,
+  ) {}
+
+  /** Add one frame's candidates; returns a stable code, if any. */
+  add(candidates: string[]): string | null {
+    this.frames.push([...new Set(candidates.map(canonicalLot))]);
+    if (this.frames.length > this.window) this.frames.shift();
+    const counts = new Map<string, number>();
+    for (const f of this.frames) for (const c of f) counts.set(c, (counts.get(c) ?? 0) + 1);
+    for (const [c, n] of counts) if (n >= this.needed) return c;
+    return null;
+  }
+
+  reset(): void {
+    this.frames = [];
+  }
+}
+
 export const ALL_RECALLED_LOTS = RECALLED_PRODUCTS.flatMap((p) => p.lots);

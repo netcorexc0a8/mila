@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RECALLED_PRODUCTS } from '../data/recall';
-import { ALL_RECALLED_LOTS, canonicalLot, checkLot, extractLotCandidates, consensusSpelling, fixDigitPrefix, hasConsensus, normalizeLot, rankCandidates } from './lot';
+import { ALL_RECALLED_LOTS, canonicalLot, checkLot, extractLotCandidates, consensusSpelling, fixDigitPrefix, FrameVotes, hasConsensus, normalizeLot, rankCandidates } from './lot';
 
 describe('recall data', () => {
   it('has the 57 published lots, each 10 characters', () => {
@@ -141,5 +141,21 @@ describe('OCR voting', () => {
 
   it('extracts the lot from a real can print with an "L-" prefix', () => {
     expect(extractLotCandidates('L- 61210346AB 05:13\nMAN 01 05 2026\nEXP 30 04 2028')).toEqual(['61210346AB']);
+  });
+});
+
+describe('FrameVotes', () => {
+  it('reports a code once two recent frames agree, ignoring confusable characters', () => {
+    const v = new FrameVotes();
+    expect(v.add(['61210346AB'])).toBeNull();
+    expect(v.add([])).toBeNull();
+    expect(v.add(['61210346A8'])).toBe(canonicalLot('61210346AB'));
+  });
+
+  it('forgets frames outside the window', () => {
+    const v = new FrameVotes(2, 2);
+    v.add(['61210346AB']);
+    v.add([]);
+    expect(v.add(['61210346AB'])).toBeNull();
   });
 });

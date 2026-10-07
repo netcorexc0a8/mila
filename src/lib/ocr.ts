@@ -220,6 +220,14 @@ async function readLotIn(
   return { lots: rankCandidates(reads), dates, rotation: found.values().next().value ?? 0 };
 }
 
+/**
+ * One fast OCR pass for live scanning: the camera calls this on a frame every
+ * second or so and waits until the same code shows up twice.
+ */
+export async function quickRead(source: CanvasImageSource, sw: number, sh: number, crop: DOMRect, rotation: Rotation): Promise<string[]> {
+  return extractLotCandidates(await recognize(preprocess(source, sw, sh, crop, 'adapt-inv', 800, rotation)));
+}
+
 /** Draw the source rotated, capped at `maxSide` pixels. */
 function rotatedCopy(source: CanvasImageSource, sw: number, sh: number, deg: Rotation, maxSide = 2400): HTMLCanvasElement {
   const k = Math.min(1, maxSide / Math.max(sw, sh));

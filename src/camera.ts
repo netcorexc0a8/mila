@@ -1,4 +1,5 @@
-import { getOcrWorker, readLot, type LotReading } from './lib/ocr';
+import { FrameVotes } from './lib/lot';
+import { getOcrWorker, quickRead, readLot, type LotReading, type Rotation } from './lib/ocr';
 import { canOutline, icons } from './icons';
 
 export type ScanResult = LotReading;
@@ -18,10 +19,11 @@ export function openCamera(onFound: (r: ScanResult) => void): void {
   root.setAttribute('aria-label', 'Сканирование номера партии');
   root.innerHTML = `
     <video class="camera__video" playsinline muted autoplay></video>
-    <div class="camera__frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="camera__frame" aria-hidden="true"><i></i><i></i><i></i><i></i><b class="camera__laser"></b></div>
     <button class="camera__icon camera__close" aria-label="Закрыть">${icons.close(30)}</button>
     <button class="camera__icon camera__torch" aria-label="Фонарик" hidden>${icons.flash(28)}</button>
-    <p class="camera__hint">Наведите камеру на номер партии (LOT)<br/>на дне банки</p>
+    <p class="camera__hint">Наведите камеру на номер партии (LOT) на&nbsp;дне банки</p>
+    <p class="camera__status" aria-live="polite"></p>
     <div class="camera__bar">
       <label class="camera__icon camera__file" aria-label="Выбрать фото из галереи">${icons.image(28)}<input type="file" accept="image/*" hidden /></label>
       <button class="camera__shutter" aria-label="Сделать снимок"></button>
@@ -47,10 +49,16 @@ export function openCamera(onFound: (r: ScanResult) => void): void {
   const ringVal = root.querySelector<SVGCircleElement>('.recog__val')!;
   const steps = [...root.querySelectorAll<HTMLElement>('.recog__list li')];
   const torchBtn = root.querySelector<HTMLButtonElement>('.camera__torch')!;
+  const status = root.querySelector<HTMLElement>('.camera__status')!;
   let stream: MediaStream | null = null;
   let torchOn = false;
+  let busy = false;
+  let loopTimer = 0;
 
-  const stopStream = () => stream?.getTracks().forEach((t) => t.stop());
+  const stopStream = () => {
+    clearTimeout(loopTimer);
+    stream?.getTracks().forEach((t) => t.stop());
+  };
   const close = () => {
     stopStream();
     root.remove();
@@ -72,6 +80,8 @@ export function openCamera(onFound: (r: ScanResult) => void): void {
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   async function run(source: CanvasImageSource, w: number, h: number, crop?: DOMRect) {
+    busy = true;
+    clearTimeout(loopTimer);
     recog.hidden = false;
     steps.forEach((s) => s.classList.remove('is-done', 'is-skip'));
     recogSub.textContent = navigator.onLine ? '' : 'Без интернета, на устройстве';
@@ -105,12 +115,19 @@ export function openCamera(onFound: (r: ScanResult) => void): void {
   }
 
   function showError(text: string) {
+    busy = false;
+    votes.reset();
+    scheduleScan(2500);
     recog.hidden = true;
     hint.innerHTML = `${text}<br/><a href="#/manual" class="camera__manual">Ввести вручную</a>`;
     hint.classList.add('camera__hint--warn');
   }
 
-  /** Map the on-screen frame to video pixels (the video is object-fit: cover). */
+  /**
+   * Map the on-screen frame to video pixels (the video is object-fit: cover),
+   * with a margin around it: people frame loosely, and a character cut by the
+   * crop edge gets misread (a clipped "6" reads as "5").
+   */
   function frameCrop(): DOMRect {
     const frame = root.querySelector<HTMLElement>('.camera__frame')!.getBoundingClientRect();
     const vw = video.videoWidth;
@@ -119,20 +136,57 @@ export function openCamera(onFound: (r: ScanResult) => void): void {
     const scale = Math.max(box.width / vw, box.height / vh);
     const offX = (vw * scale - box.width) / 2;
     const offY = (vh * scale - box.height) / 2;
-    const x = Math.max(0, (frame.left - box.left + offX) / scale);
-    const y = Math.max(0, (frame.top - box.top + offY) / scale);
-    return new DOMRect(x, y, Math.min(vw - x, frame.width / scale), Math.min(vh - y, frame.height / scale));
+    const fw = frame.width / scale;
+    const fh = frame.height / scale;
+    const x0 = Math.max(0, (frame.left - box.left + offX) / scale - fw * 0.12);
+    const y0 = Math.max(0, (frame.top - box.top + offY) / scale - fh * 0.2);
+    const x1 = Math.min(vw, x0 + fw * 1.24);
+    const y1 = Math.min(vh, y0 + fh * 1.4);
+    return new DOMRect(x0, y0, x1 - x0, y1 - y0);
   }
 
-  root.querySelector('.camera__shutter')!.addEventListener('click', () => {
-    if (!video.videoWidth) return;
-    // Freeze the frame so every OCR pass reads the same picture.
+  /** Freeze the current frame so every OCR pass reads the same picture. */
+  function grab(): HTMLCanvasElement {
     const still = document.createElement('canvas');
     still.width = video.videoWidth;
     still.height = video.videoHeight;
     still.getContext('2d')!.drawImage(video, 0, 0);
+    return still;
+  }
+
+  root.querySelector('.camera__shutter')!.addEventListener('click', () => {
+    if (!video.videoWidth || busy) return;
+    const still = grab();
     void run(still, still.width, still.height, frameCrop());
   });
+
+  // Live scanning: read a frame about once a second, alternating upright and
+  // upside down, and start the full check once two frames agree on a code.
+  const votes = new FrameVotes();
+  let frameNo = 0;
+  function scheduleScan(delay = 700) {
+    clearTimeout(loopTimer);
+    loopTimer = window.setTimeout(scanFrame, delay);
+  }
+  async function scanFrame() {
+    if (!root.isConnected || busy) return;
+    if (!video.videoWidth || document.hidden) return scheduleScan();
+    const still = grab();
+    const crop = frameCrop();
+    const rotation: Rotation = frameNo++ % 2 ? 180 : 0;
+    try {
+      const lots = await quickRead(still, still.width, still.height, crop, rotation);
+      if (busy || !root.isConnected) return;
+      status.textContent = lots.length ? 'Номер найден, держите банку неподвижно…' : 'Ищем номер партии…';
+      if (votes.add(lots)) {
+        void run(still, still.width, still.height, crop);
+        return;
+      }
+    } catch {
+      // The OCR engine may still be loading; try again shortly.
+    }
+    scheduleScan();
+  }
 
   root.querySelector<HTMLInputElement>('input[type=file]')!.addEventListener('change', async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
@@ -168,8 +222,19 @@ export function openCamera(onFound: (r: ScanResult) => void): void {
         return;
       }
       video.srcObject = stream;
-      const caps = stream.getVideoTracks()[0]?.getCapabilities?.() as { torch?: boolean } | undefined;
+      const track = stream.getVideoTracks()[0];
+      const caps = track?.getCapabilities?.() as
+        | { torch?: boolean; zoom?: { min: number; max: number }; focusMode?: string[] }
+        | undefined;
       if (caps?.torch) torchBtn.hidden = false;
+      // iPhone Pro cameras cannot focus closer than ~15 cm on the main lens:
+      // a 2× zoom lets the user hold the phone at a distance the lens can focus at.
+      const advanced: Record<string, unknown>[] = [];
+      if (caps?.focusMode?.includes('continuous')) advanced.push({ focusMode: 'continuous' });
+      if (caps?.zoom && caps.zoom.max >= 2) advanced.push({ zoom: Math.max(caps.zoom.min, 2) });
+      if (advanced.length) await track.applyConstraints({ advanced } as MediaTrackConstraints).catch(() => {});
+      status.textContent = 'Ищем номер партии…';
+      scheduleScan(1200);
     } catch {
       hint.innerHTML =
         'Нет доступа к камере. Разрешите доступ в настройках, выберите фото кнопкой слева внизу<br/>или <a href="#/manual" class="camera__manual">введите номер вручную</a>.';
