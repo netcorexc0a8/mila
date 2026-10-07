@@ -42,7 +42,12 @@ export function canonicalLot(lot: string): string {
 export interface RecallEntry {
   lot: string;
   product: RecalledProduct;
+  /** Set for batches the user blocked themselves; holds their note (may be empty). */
+  custom?: { note: string };
 }
+
+/** Shortest batch number a user may block: shorter codes would match inside unrelated numbers. */
+export const MIN_CUSTOM_LENGTH = 6;
 
 function buildIndex(products: RecalledProduct[]): Map<string, RecallEntry> {
   const index = new Map<string, RecallEntry>();
@@ -57,6 +62,26 @@ function buildIndex(products: RecalledProduct[]): Map<string, RecallEntry> {
 }
 
 const INDEX = buildIndex(RECALLED_PRODUCTS);
+
+// Batches the user added to their own block list (any brand, any length ≥ 6).
+let customEntries: { key: string; entry: RecallEntry }[] = [];
+
+/** Replace the user's own blocked batches used by `checkLot`. */
+export function setCustomLots(lots: { lot: string; note: string }[]): void {
+  customEntries = lots
+    .map(({ lot, note }) => ({ lot: normalizeLot(lot), note }))
+    .filter(({ lot }) => lot.length >= MIN_CUSTOM_LENGTH)
+    .map(({ lot, note }) => ({
+      key: canonicalLot(lot),
+      entry: { lot, product: { name: note || 'Моя партия', weight: '', lots: [lot] }, custom: { note } },
+    }));
+}
+
+/** The official recall entry for a batch number, if it is exactly one of the published lots. */
+export function officialEntry(raw: string): RecallEntry | undefined {
+  const canon = canonicalLot(raw);
+  return canon.length === LOT_LENGTH ? INDEX.get(canon) : undefined;
+}
 
 export type CheckResult =
   | { status: 'empty' }
@@ -79,19 +104,25 @@ function hammingOne(a: string, b: string): boolean {
 export function checkLot(raw: string, index: Map<string, RecallEntry> = INDEX): CheckResult {
   const input = normalizeLot(raw);
   if (!input) return { status: 'empty' };
-  if (input.length < LOT_LENGTH) return { status: 'too-short', input };
-
   const canon = canonicalLot(input);
+  // The user's own batches may be shorter than Nestlé's 10 characters.
+  const own = customEntries.find(({ key }) => canon.includes(key));
+  if (input.length < LOT_LENGTH && !own) return { status: 'too-short', input };
+
   for (let i = 0; i + LOT_LENGTH <= canon.length; i++) {
     const entry = index.get(canon.slice(i, i + LOT_LENGTH));
     if (entry) return { status: 'recalled', input, entry };
   }
+  if (own) return { status: 'recalled', input, entry: own.entry };
 
   // A single wrong character in an exact-length code is most likely a typo or misread.
   if (canon.length === LOT_LENGTH) {
     for (const [key, entry] of index) {
       if (hammingOne(key, canon)) return { status: 'similar', input, entry };
     }
+  }
+  for (const { key, entry } of customEntries) {
+    if (hammingOne(key, canon)) return { status: 'similar', input, entry };
   }
   return { status: 'not-recalled', input };
 }

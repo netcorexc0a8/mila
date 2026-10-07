@@ -38,6 +38,8 @@ export const icons = {
   terms: (s = 22) => svg('<rect x="5" y="3.5" width="14" height="17" rx="3"/><path d="M12 8v5"/><circle cx="12" cy="16.3" r="1" fill="currentColor" stroke="none"/>', s),
   backup: (s = 22) =>
     svg('<path d="M7 18a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.4 1.5A3.8 3.8 0 0 1 17.5 18"/><path d="M12 12v8M9 15l3-3 3 3"/>', s),
+  block: (s = 22) => svg('<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>', s),
+  trash: (s = 20) => svg('<path d="M4.5 7h15M10 7V5h4v2M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5"/>', s),
   list: (s = 22) => svg('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h8M8 15h5"/>', s),
 };
 

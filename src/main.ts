@@ -4,6 +4,7 @@ import { DATA_CHECKED_AT, HOTLINE, NOT_AFFECTED, PRODUCTION_PERIOD, RECALLED_PRO
 import { productInfo, UNKNOWN_PRODUCT, type ProductInfo } from './data/products';
 import { addToHistory, addToSession, clearHistory, loadHistory, loadSession, saveHistory, type HistoryItem } from './lib/history';
 import { backupFileName, makeBackup, mergeHistory, parseBackup } from './lib/backup';
+import { addCustomLot, initCustomLots, loadCustomLots, mergeCustomLots, removeCustomLot, saveCustomLots } from './lib/custom';
 import { checkLot, LOT_LENGTH, normalizeLot, type CheckResult } from './lib/lot';
 import { productionDateFromLot } from './lib/dates';
 import { openCamera, type ScanResult } from './camera';
@@ -18,6 +19,7 @@ const BACKUP_AT_KEY = 'mm.backup-at';
 const VERSION = __APP_VERSION__;
 
 registerSW({ immediate: true });
+initCustomLots();
 
 // ---------- helpers ----------
 
@@ -47,12 +49,12 @@ function plural(n: number, one: string, few: string, many: string): string {
 
 /** Hand the backup to the iOS share sheet (Save to Files, AirDrop…) or download it. */
 async function saveBackup(): Promise<string> {
-  const json = JSON.stringify(makeBackup(loadHistory()), null, 1);
+  const json = JSON.stringify(makeBackup(loadHistory(), loadCustomLots()), null, 1);
   const name = backupFileName();
   const file = new File([json], name, { type: 'application/json' });
   if (navigator.canShare?.({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: 'Можно малышу: резервная копия' });
+      await navigator.share({ files: [file], title: 'Mila: резервная копия' });
     } catch (e) {
       if ((e as Error).name === 'AbortError') return '';
       throw e;
@@ -71,11 +73,16 @@ async function saveBackup(): Promise<string> {
 
 async function restoreBackup(file: File): Promise<string> {
   const restored = parseBackup(await file.text());
-  const { items, added } = mergeHistory(loadHistory(), restored);
-  if (!saveHistory(items)) throw new Error('Не удалось сохранить историю: память браузера недоступна.');
-  return added
-    ? `Восстановлено: ${added} ${plural(added, 'проверка', 'проверки', 'проверок')}.`
-    : 'Все проверки из копии уже есть в истории.';
+  const { items, added } = mergeHistory(loadHistory(), restored.history);
+  const blocked = mergeCustomLots(loadCustomLots(), restored.blocked);
+  if (!saveHistory(items) || !saveCustomLots(blocked.items)) {
+    throw new Error('Не удалось сохранить данные: память браузера недоступна.');
+  }
+  const parts = [
+    added && `${added} ${plural(added, 'проверка', 'проверки', 'проверок')}`,
+    blocked.added && `${blocked.added} ${plural(blocked.added, 'своя партия', 'своих партии', 'своих партий')}`,
+  ].filter(Boolean);
+  return parts.length ? `Восстановлено: ${parts.join(' и ')}.` : 'Всё из копии уже есть на телефоне.';
 }
 
 function storage(kind: 'local' | 'session') {
@@ -101,8 +108,14 @@ function go(hash: string): void {
 
 /** Product shown for a check: known for recalled lots, generic otherwise. */
 function productFor(r: CheckResult): ProductInfo {
-  return r.status === 'recalled' || r.status === 'similar' ? productInfo(r.entry.product) : UNKNOWN_PRODUCT;
+  if (r.status !== 'recalled' && r.status !== 'similar') return UNKNOWN_PRODUCT;
+  if (r.entry.custom) {
+    return { title: r.entry.custom.note || 'Моя партия', description: 'Из вашего списка «Мои партии»', brand: '', tone: 'purple' };
+  }
+  return productInfo(r.entry.product);
 }
+
+const isOwn = (r: CheckResult) => (r.status === 'recalled' || r.status === 'similar') && !!r.entry.custom;
 
 type Tone = 'ok' | 'bad' | 'warn';
 const TONE: Record<HistoryItem['status'], Tone> = { recalled: 'bad', similar: 'warn', 'not-recalled': 'ok' };
@@ -143,7 +156,7 @@ function welcomeScreen(): string {
   return `<main class="screen screen--welcome">
     <div class="welcome__top">
       ${logo(112)}
-      <h1 class="brand">Можно<br/>малышу</h1>
+      <h1 class="brand">Mila</h1>
       <p class="welcome__lead">Проверьте детское питание<br/>перед покупкой</p>
     </div>
     <div class="welcome__art">
@@ -161,7 +174,7 @@ function welcomeScreen(): string {
 function homeScreen(): string {
   return page(
     `<header class="appbar">
-      <div class="appbar__brand">${logo(40)}<span>Можно<br/>малышу</span></div>
+      <div class="appbar__brand">${logo(40)}<span>Mila</span></div>
       <a href="#/about/how" class="icon-btn" aria-label="Как это работает">${icons.info(26)}</a>
     </header>
     <h1 class="h1">Проверьте детскую смесь перед покупкой</h1>
@@ -214,7 +227,8 @@ function resultScreen(rawLot: string, p: ResultParams): string {
     return manualScreen(result.status === 'too-short' ? result.input : '');
   }
   const product = productFor(result);
-  const lot = result.status === 'recalled' ? result.entry.lot : result.input;
+  const own = isOwn(result);
+  const lot = result.status === 'recalled' && !own ? result.entry.lot : result.input;
 
   if (p.save) {
     const item: HistoryItem = { ts: Date.now(), lot: result.input, status: result.status };
@@ -222,11 +236,9 @@ function resultScreen(rawLot: string, p: ResultParams): string {
     addToSession(item);
   }
 
-  const dateRow = p.exp
-    ? row('Срок годности', p.exp)
-    : (p.man ?? productionDateFromLot(lot))
-      ? row('Дата производства', (p.man ?? productionDateFromLot(lot))!)
-      : '';
+  // Other brands encode batch numbers differently, so the date is only derived for Nestlé lots.
+  const madeOn = p.man ?? (own ? undefined : productionDateFromLot(lot));
+  const dateRow = p.exp ? row('Срок годности', p.exp) : madeOn ? row('Дата производства', madeOn) : '';
   const productCard = `<div class="pcard__head">
       ${can(product === UNKNOWN_PRODUCT ? null : product, 92)}
       <div><h2 class="pcard__title">${esc(product.title)}</h2><p class="pcard__desc">${esc(product.description)}</p></div>
@@ -239,6 +251,26 @@ function resultScreen(rawLot: string, p: ResultParams): string {
   const session = loadSession();
   const sessionLink =
     session.length > 1 ? `<a class="link-quiet" href="#/session">Проверено банок: ${session.length}</a>` : '';
+
+  if (result.status === 'recalled' && own) {
+    setThemeColor('--bad-bg');
+    return page(
+      `<section class="verdict">
+        <div class="badge badge--bad">${icons.block(44)}</div>
+        <h1 class="verdict__title">Партия в вашем списке</h1>
+        <p class="verdict__sub">Вы сами добавили её в заблокированные.<br/>Не покупайте этот продукт.</p>
+      </section>
+      <section class="card pcard">
+        ${productCard}
+        ${ocrNote}
+      </section>
+      <a class="btn btn--danger btn--block" href="#/about/blocked">Мои партии</a>
+      <button class="btn btn--outline btn--block" data-action="camera">Проверить другую банку</button>
+      ${sessionLink}`,
+      'scan',
+      'screen--bad',
+    );
+  }
 
   if (result.status === 'recalled') {
     setThemeColor('--bad-bg');
@@ -271,12 +303,12 @@ function resultScreen(rawLot: string, p: ResultParams): string {
       `<section class="verdict">
         <div class="badge badge--warn">${icons.question(44)}</div>
         <h1 class="verdict__title">Проверьте номер ещё раз</h1>
-        <p class="verdict__sub">Он отличается от отозванной партии<br/>${esc(result.entry.lot)} одним символом.</p>
+        <p class="verdict__sub">Он отличается от ${own ? 'партии из вашего списка' : 'отозванной партии'}<br/>${esc(result.entry.lot)} одним символом.</p>
       </section>
       <section class="card pcard">
         ${productCard}
-        <div class="compare"><span>Отозвана партия</span><b>${diffMarkup(result.entry.lot, result.input)}</b></div>
-        <p class="small">Если на банке именно <b>${esc(result.entry.lot)}</b>, партия отозвана. Если номер введён верно, его нет в списке отзыва.</p>
+        <div class="compare"><span>${own ? 'Ваша партия' : 'Отозвана партия'}</span><b>${diffMarkup(result.entry.lot, result.input)}</b></div>
+        <p class="small">Если на банке именно <b>${esc(result.entry.lot)}</b>, ${own ? 'партия в вашем списке заблокированных' : 'партия отозвана'}. Если номер введён верно, его нет в ${own ? 'списке' : 'списке отзыва'}.</p>
         ${ocrNote}
       </section>
       <button class="btn btn--primary btn--block" data-action="edit" data-lot="${esc(result.input)}">Исправить номер</button>
@@ -298,6 +330,7 @@ function resultScreen(rawLot: string, p: ResultParams): string {
       </section>
       <p class="actual">Данные актуальны на ${longDate(DATA_CHECKED_AT)} ${icons.refresh(16)}</p>
       <button class="btn btn--outline btn--block" data-action="camera">Проверить другую банку</button>
+      <a class="link-quiet" href="#/about/blocked?lot=${encodeURIComponent(result.input)}">${icons.block(18)} Добавить в «Мои партии»</a>
       ${sessionLink}
     </div>`,
     'scan',
@@ -418,19 +451,52 @@ const ABOUT_PAGES: Record<string, { title: string; icon: string; sub?: string; b
           <div class="lots__grid">${p.lots.map((l) => `<a class="lotchip" href="#/check/${l}?view">${l}</a>`).join('')}</div></div>`;
       }).join('')}`,
   },
+  blocked: {
+    title: 'Мои партии',
+    sub: 'Свои заблокированные номера',
+    icon: icons.block(22),
+    body: () => {
+      const items = loadCustomLots();
+      const prefill = new URLSearchParams(location.hash.split('?')[1] ?? '').get('lot') ?? '';
+      return `<p>Добавьте номера партий, которые не хотите покупать: другой бренд, отзыв, о котором узнали сами, или банка, после которой малышу было плохо. Приложение предупредит при проверке.</p>
+      <form class="blocked-form" data-form="blocked" autocomplete="off">
+        <label for="blocked-lot" class="label">Номер партии</label>
+        <input id="blocked-lot" name="lot" class="input" autocapitalize="characters" spellcheck="false"
+          placeholder="например, 51510346AB" maxlength="30" enterkeyhint="next" value="${esc(prefill)}" />
+        <label for="blocked-note" class="label">Название или заметка <span class="muted">(необязательно)</span></label>
+        <input id="blocked-note" name="note" class="input input--text" maxlength="60" placeholder="например, Малютка 2, 600 г" enterkeyhint="done" />
+        <p class="hint" data-blocked-msg role="status"></p>
+        <button class="btn btn--primary btn--block" type="submit">${icons.block(22)} Заблокировать партию</button>
+      </form>
+      ${
+        items.length
+          ? `<h3>В списке: ${items.length}</h3><ul class="blocked-list">${items
+              .map(
+                (i) => `<li>
+                <a href="#/check/${encodeURIComponent(i.lot)}?view"><b class="mono">${esc(i.lot)}</b><span>${esc(i.note || 'Без заметки')} · ${formatTime(i.ts)}</span></a>
+                <button class="icon-btn icon-btn--ink" data-action="blocked-remove" data-lot="${esc(i.lot)}" aria-label="Удалить ${esc(i.lot)}">${icons.trash(20)}</button>
+              </li>`,
+              )
+              .join('')}</ul>`
+          : `<p class="small">Список пока пуст.</p>`
+      }
+      <p class="small">Список хранится только на этом телефоне и попадает в резервную копию.</p>`;
+    },
+  },
   backup: {
     title: 'Резервная копия',
     sub: 'Сохранить и восстановить историю',
     icon: icons.backup(22),
     body: () => {
       const n = loadHistory().length;
+      const m = loadCustomLots().length;
       const last = get(BACKUP_AT_KEY);
-      return `<p>История проверок хранится только на этом телефоне. Сохраните копию в файл, чтобы не потерять её при смене телефона или очистке браузера.</p>
-      <p class="backup-stat"><b>${n}</b> ${plural(n, 'проверка', 'проверки', 'проверок')} в истории${last ? `<br/><span>Последняя копия: ${formatTime(Number(last))}</span>` : ''}</p>
-      <button class="btn btn--primary btn--block" data-action="backup-save" ${n ? '' : 'disabled'}>${icons.backup(22)} Сохранить копию</button>
+      return `<p>История проверок и ваши заблокированные партии хранятся только на этом телефоне. Сохраните копию в файл, чтобы не потерять их при смене телефона или очистке браузера.</p>
+      <p class="backup-stat"><b>${n}</b> ${plural(n, 'проверка', 'проверки', 'проверок')} в истории${m ? `<br/><b>${m}</b> ${plural(m, 'своя партия', 'своих партии', 'своих партий')}` : ''}${last ? `<br/><span>Последняя копия: ${formatTime(Number(last))}</span>` : ''}</p>
+      <button class="btn btn--primary btn--block" data-action="backup-save" ${n + m ? '' : 'disabled'}>${icons.backup(22)} Сохранить копию</button>
       <label class="btn btn--outline btn--block">Восстановить из файла<input type="file" accept="application/json,.json" data-backup-input hidden /></label>
       <p class="backup-msg" data-backup-msg role="status"></p>
-      <p class="small">На iPhone выберите «Сохранить в Файлы» и iCloud Drive: копия будет доступна и на новом телефоне. При восстановлении проверки добавляются к текущей истории, повторы не дублируются.</p>`;
+      <p class="small">На iPhone выберите «Сохранить в Файлы» и iCloud Drive: копия будет доступна и на новом телефоне. При восстановлении данные добавляются к текущим, повторы не дублируются.</p>`;
     },
   },
   privacy: {
@@ -442,7 +508,7 @@ const ABOUT_PAGES: Record<string, { title: string; icon: string; sub?: string; b
   terms: {
     title: 'Условия использования',
     icon: icons.terms(22),
-    body: () => `<p>«Можно малышу» — неофициальное приложение, не связанное с Nestlé. Оно сравнивает номер партии с опубликованным Nestlé списком отозванных партий.</p>
+    body: () => `<p>Mila — неофициальное приложение, не связанное с Nestlé. Оно сравнивает номер партии с опубликованным Nestlé списком отозванных партий.</p>
       <p>Распознавание номера может ошибаться, поэтому всегда сверяйте номер на экране с номером на банке. Если сомневаетесь, позвоните на горячую линию Nestlé ${HOTLINE}.</p>`,
   },
 };
@@ -452,7 +518,7 @@ function aboutScreen(): string {
     `<h1 class="h2">О приложении</h1>
     <div class="about-head">
       ${logo(84)}
-      <h2>Можно малышу</h2>
+      <h2>Mila</h2>
       <p>Проверяйте детское питание<br/>перед покупкой</p>
       <span class="version">Версия ${VERSION}</span>
     </div>
@@ -587,6 +653,14 @@ app.addEventListener('click', (e) => {
         })
         .catch(() => showBackupMsg('Не удалось сохранить копию.', true));
       break;
+    case 'blocked-remove': {
+      const lot = el.dataset.lot ?? '';
+      if (confirm(`Удалить партию ${lot} из вашего списка?`)) {
+        removeCustomLot(lot);
+        render();
+      }
+      break;
+    }
     case 'offline-continue':
       set(OFFLINE_SEEN_KEY, '1', 'session');
       render();
@@ -616,12 +690,14 @@ app.addEventListener('change', (e) => {
 
 app.addEventListener('submit', (e) => {
   const form = e.target as HTMLFormElement;
+  if (form.dataset.form === 'blocked') return submitBlocked(e, form);
   if (form.dataset.form !== 'lot') return;
   e.preventDefault();
   const input = form.querySelector<HTMLInputElement>('#lot')!;
   const lot = normalizeLot(input.value);
   const hint = form.querySelector<HTMLElement>('[data-hint]')!;
-  if (lot.length < LOT_LENGTH) {
+  // Own blocked batches may be shorter than Nestlé's.
+  if (checkLot(lot).status === 'too-short' || !lot) {
     hint.textContent = lot
       ? `Номер партии состоит из ${LOT_LENGTH} символов, введено ${lot.length}.`
       : 'Введите номер партии с дна банки.';
@@ -632,6 +708,26 @@ app.addEventListener('submit', (e) => {
   input.blur();
   go(`#/check/${encodeURIComponent(lot)}`);
 });
+
+function submitBlocked(e: Event, form: HTMLFormElement): void {
+  e.preventDefault();
+  const lotInput = form.querySelector<HTMLInputElement>('#blocked-lot')!;
+  const note = form.querySelector<HTMLInputElement>('#blocked-note')!.value;
+  const r = addCustomLot(lotInput.value, note);
+  if (!r.ok) {
+    const msg = form.querySelector<HTMLElement>('[data-blocked-msg]')!;
+    msg.textContent = r.error;
+    msg.classList.add('hint--warn');
+    lotInput.focus();
+    return;
+  }
+  (document.activeElement as HTMLElement | null)?.blur();
+  // Drop a ?lot= prefill so the form comes back empty.
+  if (location.hash !== '#/about/blocked') history.replaceState(null, '', '#/about/blocked');
+  render();
+  const msg = app.querySelector<HTMLElement>('[data-blocked-msg]');
+  if (msg) msg.textContent = `Партия ${r.item.lot} добавлена.`;
+}
 
 app.addEventListener('input', (e) => {
   const input = e.target as HTMLInputElement;

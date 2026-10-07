@@ -1,22 +1,29 @@
 import type { HistoryItem, HistoryStatus } from './history';
+import { isCustomLot, type CustomLot } from './custom';
 
 /** File format of a backup. Kept small and readable so it can be inspected or moved between phones. */
 export interface Backup {
-  app: 'mozhno-malyshu';
+  app: 'mila';
   version: 1;
   createdAt: string;
   history: HistoryItem[];
+  /** The user's own blocked batches (added in Mila; older copies have none). */
+  blocked?: CustomLot[];
 }
+
+/** Copies saved before the app was renamed to Mila. */
+const APP_IDS = ['mila', 'mozhno-malyshu'];
+const NOT_A_BACKUP = 'Это не файл резервной копии Mila.';
 
 const STATUSES: HistoryStatus[] = ['recalled', 'similar', 'not-recalled'];
 
-export function makeBackup(history: HistoryItem[], now = new Date()): Backup {
-  return { app: 'mozhno-malyshu', version: 1, createdAt: now.toISOString(), history };
+export function makeBackup(history: HistoryItem[], blocked: CustomLot[] = [], now = new Date()): Backup {
+  return { app: 'mila', version: 1, createdAt: now.toISOString(), history, blocked };
 }
 
 export function backupFileName(now = new Date()): string {
   const d = now.toISOString().slice(0, 10);
-  return `mozhno-malyshu-${d}.json`;
+  return `mila-${d}.json`;
 }
 
 function isItem(x: unknown): x is HistoryItem {
@@ -32,19 +39,22 @@ function isItem(x: unknown): x is HistoryItem {
 }
 
 /** Parse a backup file; throws a user-facing (Russian) message when the file is not a backup. */
-export function parseBackup(text: string): HistoryItem[] {
+export function parseBackup(text: string): { history: HistoryItem[]; blocked: CustomLot[] } {
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error('Это не файл резервной копии «Можно малышу».');
+    throw new Error(NOT_A_BACKUP);
   }
-  const b = data as Partial<Backup>;
-  if (b?.app !== 'mozhno-malyshu' || !Array.isArray(b.history)) {
-    throw new Error('Это не файл резервной копии «Можно малышу».');
-  }
+  const b = data as { app?: unknown; version?: unknown; history?: unknown; blocked?: unknown } | null;
+  if (!b || !APP_IDS.includes(b.app as string) || !Array.isArray(b.history)) throw new Error(NOT_A_BACKUP);
   if (b.version !== 1) throw new Error('Копия сделана более новой версией приложения. Обновите приложение.');
-  return b.history.filter(isItem).map(({ ts, lot, status }) => ({ ts, lot, status }));
+  return {
+    history: b.history.filter(isItem).map(({ ts, lot, status }) => ({ ts, lot, status })),
+    blocked: (Array.isArray(b.blocked) ? b.blocked : [])
+      .filter(isCustomLot)
+      .map(({ lot, note, ts }) => ({ lot, note: note.slice(0, 60), ts })),
+  };
 }
 
 /**

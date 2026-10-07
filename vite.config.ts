@@ -13,8 +13,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Можно малышу — проверка детской смеси',
-        short_name: 'Можно малышу',
+        name: 'Mila — проверка детской смеси',
+        short_name: 'Mila',
         description: 'Проверка банок детской смеси Nestlé по списку отозванных партий. Работает без интернета.',
         lang: 'ru',
         start_url: '.',
