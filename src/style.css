@@ -1,38 +1,47 @@
 /* Layout follows the mockup (screens 1–10), sized for iPhone 12 and newer:
    390–440 pt wide, notch / Dynamic Island on top, home indicator below. */
 
+/* Colours, type and shapes follow the «Кормилка» app (github.com/netcorexc0a8/be):
+   calm sea-blue accent, flat white cards with a hairline border, Unbounded for
+   headings and numbers, Onest for text. */
 :root {
-  --bg: #f5f8fd;
+  --bg: #f3f6f8;
   --surface: #ffffff;
-  --ink: #1b2f5e;
-  --ink-2: #4f6187;
-  --muted: #7c8aa8;
-  --line: #e4eaf4;
-  --primary: #3a7cf0;
-  --primary-2: #2f6be0;
-  --primary-soft: #e8f0fd;
-  --ok: #2e9e6b;
-  --ok-bg: #e6f6ef;
-  --ok-chip: #d9f2e6;
-  --bad: #ef3e46;
-  --bad-bg: #fdeeee;
-  --bad-chip: #fde0e1;
-  --warn: #e08a00;
-  --warn-bg: #fff6e6;
-  --warn-chip: #ffecc8;
-  --radius: 22px;
-  --shadow: 0 8px 28px rgb(38 74 140 / 8%);
+  --ink: #1c2a33;
+  --ink-2: #44565f;
+  --muted: #5f717d;
+  --line: #dce4ea;
+  --primary: #2e6e8e;
+  --primary-2: #2e6e8e;
+  --primary-soft: #e1eef4;
+  --on-primary: #ffffff;
+  --milk: #fbf6ea;
+  --milk-edge: #e8dcc0;
+  --ok: #2f7d5b;
+  --ok-bg: #e5f3ec;
+  --ok-chip: #d6ece0;
+  --bad: #b23a2e;
+  --bad-bg: #fde7e5;
+  --bad-chip: #f9d3cf;
+  --bad-fg: #9b2c22;
+  --warn: #a86f00;
+  --warn-bg: #fff4dc;
+  --warn-chip: #fbe6b5;
+  --warn-fg: #7a5300;
+  --radius: 20px;
+  --shadow: none;
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
-  --gutter: clamp(18px, 5.4vw, 26px);
+  --gutter: 16px;
   --tabbar-h: 64px;
-  --font: ui-rounded, 'SF Pro Rounded', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Nunito', sans-serif;
-  --outline: #bcd2f8;
-  --soft: #eef2f9;
-  --ok-panel: linear-gradient(180deg, #e3f5ee, #eef8f6 60%, #f1f6fd);
-  --ok-title: #14504a;
-  --tabbar-bg: rgb(255 255 255 / 92%);
-  --ring: #c9dbfa;
+  --font: 'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Unbounded', 'Arial Rounded MT Bold', system-ui, sans-serif;
+  --outline: var(--line);
+  --soft: var(--primary-soft);
+  --ok-panel: var(--ok-bg);
+  --ok-title: #1f5a40;
+  --tabbar-bg: rgb(255 255 255 / 94%);
+  --ring: var(--primary-soft);
   --art-bg: transparent;
   color-scheme: light;
 }
@@ -40,31 +49,31 @@
 /* Dark theme follows the phone's setting (iOS: Settings → Display & Brightness). */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e1524;
-    --surface: #18223a;
-    --ink: #eaf0fb;
-    --ink-2: #aab7d3;
-    --muted: #7f8db0;
-    --line: #26324d;
-    --primary: #5b93f5;
-    --primary-2: #4a86f2;
-    --primary-soft: #1d2d52;
-    --ok: #3ccf8e;
-    --ok-bg: #0f2a22;
-    --ok-chip: #143829;
-    --bad: #ff6b72;
-    --bad-bg: #2d1418;
-    --bad-chip: #47202a;
-    --warn: #f5b443;
-    --warn-bg: #2c2210;
-    --warn-chip: #44331a;
-    --shadow: 0 8px 28px rgb(0 0 0 / 35%);
-    --outline: #34497a;
-    --soft: #1f2a44;
-    --ok-panel: linear-gradient(180deg, #11342a, #10261f 60%, #0e1524);
-    --ok-title: #b9f0d6;
-    --tabbar-bg: rgb(20 28 46 / 92%);
-    --ring: #2a3f6b;
+    --bg: #11181d;
+    --surface: #1a242b;
+    --ink: #e6edf1;
+    --ink-2: #c0ccd3;
+    --muted: #9aabb6;
+    --line: #2c3a43;
+    --primary: #7fb8d6;
+    --primary-2: #7fb8d6;
+    --primary-soft: #1f3644;
+    --on-primary: #11181d;
+    --milk: #f1e9d6;
+    --milk-edge: #8c7f62;
+    --ok: #6fcf9f;
+    --ok-bg: #15291f;
+    --ok-chip: #1d3a2c;
+    --bad: #f4a69c;
+    --bad-bg: #3d1e1b;
+    --bad-chip: #552824;
+    --bad-fg: #f4a69c;
+    --warn: #f2cf7e;
+    --warn-bg: #3a2f14;
+    --warn-chip: #4d3e1a;
+    --warn-fg: #f2cf7e;
+    --ok-title: #b5ecd0;
+    --tabbar-bg: rgb(26 36 43 / 94%);
     --art-bg: #f4f1ec;
     color-scheme: dark;
   }
@@ -1344,4 +1353,213 @@ mark {
   border: 0;
   box-shadow: none;
   color: var(--muted);
+}
+
+/* ---------- «Кормилка» design layer ---------- */
+
+body {
+  font: 16px/1.45 var(--font);
+}
+.brand,
+.appbar__brand,
+.h1,
+.h2,
+.navbar__title,
+.verdict__title,
+.pcard__title,
+.about-head h2,
+.offline h1,
+.recog__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.brand {
+  font-size: clamp(42px, 12vw, 52px);
+  line-height: 1;
+}
+.appbar__brand {
+  font-size: 22px;
+}
+.h1 {
+  font-size: clamp(24px, 6.6vw, 28px);
+  line-height: 1.2;
+}
+.h2 {
+  font-size: 22px;
+}
+.navbar__title {
+  font-size: 19px;
+}
+.verdict__title {
+  font-size: clamp(21px, 5.8vw, 24px);
+  line-height: 1.25;
+}
+.pcard__title {
+  font-size: 18px;
+}
+.mono,
+.facts dd.mono,
+.compare b,
+.lotchip,
+.blocked-list a b,
+.backup-stat b {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cards: flat, hairline border. */
+.card,
+.group,
+.okpanel .card {
+  box-shadow: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.okpanel {
+  background: var(--ok-bg);
+  border-radius: var(--radius);
+  margin: 0;
+}
+
+/* Buttons: solid accent, soft accent for secondary. */
+.btn {
+  min-height: 52px;
+  border-radius: 12px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.btn--primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  box-shadow: none;
+}
+.btn--primary svg {
+  color: var(--on-primary);
+}
+.btn--outline,
+.screen--ok .btn--outline,
+.screen--bad .btn--outline,
+.screen--warn .btn--outline {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: 0;
+  box-shadow: none;
+}
+.btn--danger {
+  background: var(--bad);
+  color: var(--surface);
+  box-shadow: none;
+}
+.btn--soft {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.link,
+.link-quiet {
+  color: var(--primary);
+}
+
+/* Form fields like the calculator's inputs. */
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.blocked-form .label {
+  color: var(--muted);
+}
+.input {
+  height: 52px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  font: 500 20px/1 var(--font-display);
+  letter-spacing: 0.04em;
+}
+.input--text {
+  font: 500 17px/1 var(--font);
+  letter-spacing: 0;
+}
+.input:focus {
+  box-shadow: none;
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-color: var(--line);
+}
+:focus-visible {
+  outline: 2px solid var(--primary);
+}
+
+/* Verdict badges: flat circles. */
+.badge {
+  width: 72px;
+  height: 72px;
+  color: var(--surface);
+}
+.badge svg {
+  width: 38px;
+  height: 38px;
+}
+.badge--ok {
+  background: var(--ok);
+  box-shadow: none;
+}
+.badge--bad {
+  background: var(--bad);
+  box-shadow: none;
+}
+.badge--warn {
+  background: var(--warn);
+  box-shadow: none;
+}
+.screen--bad .verdict__title,
+.screen--bad .verdict__sub {
+  color: var(--bad-fg);
+}
+.screen--warn .verdict__title {
+  color: var(--warn-fg);
+}
+.alert {
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+  border-radius: 12px;
+}
+
+/* Status chips and notes. */
+.chip {
+  font-weight: 600;
+  font-size: 12px;
+}
+.chip--ok {
+  background: var(--ok-chip);
+  color: var(--ok-title);
+}
+.chip--bad {
+  background: var(--bad-chip);
+  color: var(--bad-fg);
+}
+.chip--warn {
+  background: var(--warn-chip);
+  color: var(--warn-fg);
+}
+.lotchip {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: 999px;
+}
+
+/* Scanner frame on home uses the accent colour, without heavy corners. */
+.scan-hero i {
+  border-width: 3px;
+}
+
+.tabbar {
+  border-top: 1px solid var(--line);
+  box-shadow: none;
+}
+.tab.is-active {
+  color: var(--primary);
 }

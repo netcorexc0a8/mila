@@ -43,26 +43,16 @@ export const icons = {
   list: (s = 22) => svg('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h8M8 15h5"/>', s),
 };
 
-/** App logo: a mother's face in a blue crescent with a pink heart (as in the mockup). */
+/** App logo in the style of the «Кормилка» icon: a milk can with a check mark on a sea-blue tile. */
+export const LOGO_SVG_BODY = `
+    <rect width="120" height="120" rx="27" fill="#2E6E8E"/>
+    <rect x="34" y="22" width="52" height="12" rx="6" fill="#E1EEF4"/>
+    <rect x="30" y="30" width="60" height="70" rx="14" fill="#FBF6EA"/>
+    <path d="M30 74H90V86a14 14 0 0 1-14 14H44a14 14 0 0 1-14-14Z" fill="#E8DCC0"/>
+    <path d="M45 55l10 10 20-21" fill="none" stroke="#2E6E8E" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>`;
+
 export function logo(size = 96): string {
-  return `<svg viewBox="0 0 120 120" width="${size}" height="${size}" aria-hidden="true" class="logo">
-    <defs>
-      <linearGradient id="lg-moon" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#6c9cf2"/><stop offset="1" stop-color="#3f78e6"/>
-      </linearGradient>
-      <linearGradient id="lg-heart" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#ffb0bd"/><stop offset="1" stop-color="#f27d93"/>
-      </linearGradient>
-    </defs>
-    <circle cx="56" cy="62" r="50" fill="url(#lg-moon)"/>
-    <path d="M38 40c10-14 32-18 48-8 10 7 15 18 15 30 0 22-18 40-40 40-16 0-28-9-33-22z" fill="#fff"/>
-    <path d="M30 44c8-18 30-26 50-18 9 4 15 11 18 19-12-9-30-12-46-4-8 4-15 10-20 18-2-5-3-10-2-15z" fill="url(#lg-moon)"/>
-    <path d="M52 66q4 3 8 0" stroke="#3f6fd8" stroke-width="3" fill="none" stroke-linecap="round"/>
-    <path d="M70 66q4 3 8 0" stroke="#3f6fd8" stroke-width="3" fill="none" stroke-linecap="round"/>
-    <path d="M60 80q6 5 12 0" stroke="#3f6fd8" stroke-width="3" fill="none" stroke-linecap="round"/>
-    <circle cx="51" cy="74" r="4" fill="#ffc7d1" opacity=".8"/>
-    <path d="M100 56c-5-9-20-6-18 5 1 7 18 18 18 18s17-11 18-18c2-11-13-14-18-5z" fill="url(#lg-heart)" stroke="#fff" stroke-width="2.5"/>
-  </svg>`;
+  return `<svg viewBox="0 0 120 120" width="${size}" height="${size}" aria-hidden="true" class="logo">${LOGO_SVG_BODY}</svg>`;
 }
 
 const TONES: Record<CanTone, [string, string]> = {

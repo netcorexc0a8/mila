@@ -1,3 +1,13 @@
+import '@fontsource/onest/cyrillic-400.css';
+import '@fontsource/onest/cyrillic-500.css';
+import '@fontsource/onest/cyrillic-600.css';
+import '@fontsource/onest/latin-400.css';
+import '@fontsource/onest/latin-500.css';
+import '@fontsource/onest/latin-600.css';
+import '@fontsource/unbounded/cyrillic-500.css';
+import '@fontsource/unbounded/cyrillic-700.css';
+import '@fontsource/unbounded/latin-500.css';
+import '@fontsource/unbounded/latin-700.css';
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { DATA_CHECKED_AT, HOTLINE, NOT_AFFECTED, PRODUCTION_PERIOD, RECALLED_PRODUCTS, SOURCE_URL } from './data/recall';
