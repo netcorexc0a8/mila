@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RECALLED_PRODUCTS } from '../data/recall';
-import { ALL_RECALLED_LOTS, canonicalLot, checkLot, extractLotCandidates, consensusSpelling, fixDigitPrefix, FrameVotes, hasConsensus, normalizeLot, rankCandidates } from './lot';
+import { alignToPrefix, ALL_RECALLED_LOTS, canonicalLot, checkLot, extractLotCandidates, consensusSpelling, fixDigitPrefix, FrameVotes, hasConsensus, normalizeLot, rankCandidates } from './lot';
 
 describe('recall data', () => {
   it('has the 57 published lots, each 10 characters', () => {
@@ -81,12 +81,17 @@ describe('extractLotCandidates', () => {
   });
 
   it('returns unknown 10-character codes for the user to confirm', () => {
-    expect(extractLotCandidates('LOT 53990346ZZ')).toEqual(['53990346ZZ']);
+    expect(extractLotCandidates('LOT 53090346ZZ')).toEqual(['53090346ZZ']);
   });
 
   it('puts recalled lots first', () => {
-    const c = extractLotCandidates('53990346ZZ\n52560346AA');
+    const c = extractLotCandidates('53090346ZZ\n52560346AA');
     expect(c[0]).toBe('52560346AA');
+  });
+
+  it('ignores codes whose day of the year is impossible, and junk letters in the digit part', () => {
+    expect(extractLotCandidates('LOT 53990346ZZ')).toEqual([]);
+    expect(extractLotCandidates('WE19950720')).toEqual([]);
   });
 
   it('ignores text without codes', () => {
@@ -135,12 +140,53 @@ describe('OCR voting', () => {
   it('detects consensus when two passes agree up to confusable characters', () => {
     expect(hasConsensus([['61210348A8'], ['61210346AB']])).toBe(false);
     expect(hasConsensus([['61210346AB'], ['61210346A8']])).toBe(true);
-    expect(hasConsensus([[], ['51510346AB']])).toBe(true);
+    // A single read of a recalled lot is not enough: it may be a misread neighbour.
+    expect(hasConsensus([[], ['51510346AB']])).toBe(false);
+    expect(hasConsensus([['51510346AB'], ['51510346AB']])).toBe(true);
     expect(hasConsensus([[], []])).toBe(false);
+  });
+
+  it('keeps reading while passes disagree in one digit, and outvotes the odd one', () => {
+    expect(hasConsensus([['61240346AB'], ['61210346AB'], ['61240346AB']])).toBe(false);
+    expect(hasConsensus([['61240346AB'], ['61210346AB'], ['61240346AB'], ['61240346AB']])).toBe(true);
+    expect(rankCandidates([['61260346AB'], ['61240346AB'], ['61240346AB'], ['61240366AB']])).toEqual(['61240346AB']);
+  });
+
+  it('reads a dot-matrix "A" seen as "R" before "B"', () => {
+    expect(consensusSpelling(['61210346RB', '61210346R8'])).toBe('61210346AB');
   });
 
   it('extracts the lot from a real can print with an "L-" prefix', () => {
     expect(extractLotCandidates('L- 61210346AB 05:13\nMAN 01 05 2026\nEXP 30 04 2028')).toEqual(['61210346AB']);
+  });
+});
+
+describe('production date check', () => {
+  // Real reads of cans "L- 61240346AB 20:59 / MAN 04 05 2026 / EXP 03 05 2028".
+  it('fixes one misread digit of the date part', () => {
+    expect(alignToPrefix('61210346AB', '6124')).toBe('61240346AB');
+    expect(alignToPrefix('61260346AB', '6124')).toBe('61240346AB');
+    expect(alignToPrefix('51210346AB', '6121')).toBe('61210346AB');
+    // Two digits off: a different code, not a misreading.
+    expect(alignToPrefix('52800017C2', '6124')).toBe('52800017C2');
+    expect(alignToPrefix('61210346AB', undefined)).toBe('61210346AB');
+  });
+
+  it('repairs an 11-character read with a stray digit', () => {
+    expect(extractLotCandidates('LL 612710346A8 20:84', '6121')).toEqual(['61210346A8']);
+    expect(extractLotCandidates('LL 612710346A8 20:84')).toEqual([]);
+  });
+
+  it('does not let a misread recalled code override the date on the can', () => {
+    // 61210346AB vs 61240346AB: the "4" read as "1" once.
+    const reads = [['61210346AB'], ['61240346AB'], ['61240346A8']];
+    expect(rankCandidates(reads, '6124')[0]).toBe('61240346AB');
+    expect(extractLotCandidates('L- 52800017C2', '6124')).toEqual(['52800017C2']);
+  });
+
+  it('ranks the reading that matches the date first', () => {
+    expect(rankCandidates([['61210348AB'], ['61240346AB']], '6124')[0]).toBe('61240346AB');
+    expect(rankCandidates([['61240346N8'], ['61240346AB'], ['61240346A8']], '6124')).toEqual(['61240346AB']);
   });
 });
 

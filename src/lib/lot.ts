@@ -135,11 +135,33 @@ export function fixDigitPrefix(lot: string): string {
     .join('');
 }
 
+/** Digits 2–4 of a Nestlé batch number are the day of the year, so they must be 001–366. */
+function plausibleLot(lot: string): boolean {
+  if (!new RegExp(`^\\d{${DIGIT_PREFIX}}`).test(lot)) return false;
+  const day = Number(lot.slice(1, 4));
+  return day >= 1 && day <= 366;
+}
+
+/**
+ * The first four digits of a batch number encode the production date printed
+ * under it. When a reading differs from that date in exactly one of those
+ * digits (dot-matrix "1", "4" and "7" are easy to mix up), the date wins.
+ */
+export function alignToPrefix(lot: string, prefix?: string): string {
+  if (!prefix || lot.length !== LOT_LENGTH) return lot;
+  let diff = 0;
+  for (let i = 0; i < prefix.length; i++) if (lot[i] !== prefix[i]) diff++;
+  return diff === 1 ? prefix + lot.slice(prefix.length) : lot;
+}
+
 /**
  * Pull likely batch numbers out of OCR text: alphanumeric runs of exactly 10
- * characters, or a recalled lot found anywhere inside a longer run.
+ * characters, or a recalled lot found anywhere inside a longer run. With a
+ * `prefix` vouched for by the dates on the can, readings are aligned to it,
+ * and an 11-character run with one stray character (a dot read as "7") is
+ * repaired.
  */
-export function extractLotCandidates(text: string): string[] {
+export function extractLotCandidates(text: string, prefix?: string): string[] {
   const found: string[] = [];
   const add = (s: string) => {
     if (!found.includes(s)) found.push(s);
@@ -150,38 +172,82 @@ export function extractLotCandidates(text: string): string[] {
     const runs = [...tokens];
     for (let i = 0; i + 1 < tokens.length; i++) runs.push(tokens[i] + tokens[i + 1]);
     for (const run of runs) {
-      const result = checkLot(run);
-      if (result.status === 'recalled') add(result.entry.lot);
-      else if (run.length === LOT_LENGTH && /\d{6}/.test(run)) add(fixDigitPrefix(run));
+      const variants = [run.length === LOT_LENGTH ? alignToPrefix(fixDigitPrefix(run), prefix) : run];
+      if (prefix && run.length === LOT_LENGTH + 1) {
+        for (let i = 0; i < DIGIT_PREFIX; i++) {
+          const v = fixDigitPrefix(run.slice(0, i) + run.slice(i + 1));
+          if (v.startsWith(prefix)) variants.push(v);
+        }
+      }
+      for (const v of variants) {
+        const result = checkLot(v);
+        // A recalled lot that contradicts the production date is a misreading of another code.
+        if (result.status === 'recalled' && (!prefix || !/^\d{4}/.test(result.entry.lot) || result.entry.lot.startsWith(prefix))) {
+          add(result.entry.lot);
+        } else if (v.length === LOT_LENGTH && plausibleLot(v)) add(v);
+      }
     }
   }
   // Recalled hits first so they are never hidden behind noise.
   return found.sort((a, b) => Number(checkLot(b).status === 'recalled') - Number(checkLot(a).status === 'recalled'));
 }
 
+interface Cluster {
+  key: string;
+  reads: Set<number>;
+  spellings: string[];
+  first: number;
+}
+
 /**
- * Merge candidates from several OCR passes. Readings that are equal up to
- * confusable characters are one vote; the most common spelling represents the
- * group. Recalled lots always come first so a match is never hidden.
+ * Group readings across passes. Readings equal up to confusable characters
+ * are one group, and a 10-character group one character away from a bigger
+ * one joins it ("61260346AB" next to three "61240346AB"): a single misread
+ * dot-matrix digit should be outvoted character by character, not compete as
+ * a separate code.
  */
-export function rankCandidates(reads: string[][]): string[] {
-  const groups = new Map<string, { votes: number; spellings: string[]; first: number }>();
+function clusterReads(reads: string[][]): Cluster[] {
+  const byKey = new Map<string, Cluster>();
   let order = 0;
-  for (const read of reads) {
+  reads.forEach((read, r) => {
     for (const cand of new Set(read)) {
       const key = canonicalLot(cand);
-      const g = groups.get(key) ?? { votes: 0, spellings: [], first: order++ };
-      g.votes++;
-      g.spellings.push(cand);
-      groups.set(key, g);
+      const c = byKey.get(key) ?? { key, reads: new Set<number>(), spellings: [], first: order++ };
+      c.reads.add(r);
+      c.spellings.push(cand);
+      byKey.set(key, c);
     }
+  });
+  const clusters: Cluster[] = [];
+  for (const c of [...byKey.values()].sort((a, b) => b.reads.size - a.reads.size || a.first - b.first)) {
+    const home = clusters.find((h) => h.key.length === LOT_LENGTH && hammingOne(h.key, c.key));
+    if (!home) {
+      clusters.push({ ...c, reads: new Set(c.reads), spellings: [...c.spellings] });
+      continue;
+    }
+    c.reads.forEach((r) => home.reads.add(r));
+    home.spellings.push(...c.spellings);
+    home.first = Math.min(home.first, c.first);
   }
-  return [...groups.values()]
-    .map((g) => {
-      const lot = consensusSpelling(g.spellings);
-      return { ...g, lot, recalled: checkLot(lot).status === 'recalled' };
+  return clusters;
+}
+
+/**
+ * Merge candidates from several OCR passes into a ranked list. Each group is
+ * spelled by a character-by-character majority. A group matching the
+ * production date on the can (`prefix`) comes first, then recalled lots, so a
+ * match is never hidden, then the most votes.
+ */
+export function rankCandidates(reads: string[][], prefix?: string): string[] {
+  return clusterReads(reads)
+    .map((c) => {
+      const lot = consensusSpelling(c.spellings);
+      return { votes: c.reads.size, first: c.first, lot, recalled: checkLot(lot).status === 'recalled', dated: !!prefix && lot.startsWith(prefix) };
     })
-    .sort((a, b) => Number(b.recalled) - Number(a.recalled) || b.votes - a.votes || a.first - b.first)
+    .sort(
+      (a, b) =>
+        Number(b.dated) - Number(a.dated) || Number(b.recalled) - Number(a.recalled) || b.votes - a.votes || a.first - b.first,
+    )
     // Once passes agree, one-off readings are noise unless they hit a recalled lot.
     .filter((g, _, all) => g.recalled || g.votes > 1 || all.every((o) => o.votes < 2))
     .map((g) => g.lot);
@@ -204,6 +270,8 @@ export function consensusSpelling(spellings: string[]): string {
     )[0][0];
   });
   if (len === LOT_LENGTH) {
+    // Dot-matrix "A" is also read as "R" in front of a "B".
+    if (chars[8] === 'R' && /[B8]/.test(chars[9])) chars[8] = 'A';
     const look: Record<string, string> = { '8': 'B', '4': 'A' };
     const [a, b] = [chars[8], chars[9]];
     if (/[A-Z]/.test(a) && look[b]) chars[9] = look[b];
@@ -214,16 +282,22 @@ export function consensusSpelling(spellings: string[]): string {
   return chars.join('');
 }
 
-/** True once two passes produced the same reading, or any pass found a recalled lot. */
+/**
+ * True once the passes clearly agree: one reading seen three times, or twice
+ * with no competing reading one character away. Two passes that disagree in a
+ * single digit (dot-matrix "4" and "1") are not enough to stop.
+ */
 export function hasConsensus(reads: string[][]): boolean {
-  const seen = new Set<string>();
-  for (const read of reads) {
-    for (const cand of new Set(read.map(canonicalLot))) {
-      if (seen.has(cand)) return true;
-      seen.add(cand);
-    }
+  const counts = new Map<string, number>();
+  for (const read of reads) for (const key of new Set(read.map(canonicalLot))) counts.set(key, (counts.get(key) ?? 0) + 1);
+  for (const [key, n] of counts) {
+    if (n >= 3) return true;
+    if (n < 2) continue;
+    let rivals = 0;
+    for (const [other, m] of counts) if (other.length === key.length && hammingOne(other, key)) rivals += m;
+    if (rivals === 0) return true;
   }
-  return reads.some((r) => r.some((c) => checkLot(c).status === 'recalled'));
+  return false;
 }
 
 /**

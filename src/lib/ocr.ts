@@ -1,5 +1,5 @@
 import type { Worker } from 'tesseract.js';
-import { parseCanDates, type CanDates } from './dates';
+import { parseCanDates, trustedLotPrefix, type CanDates } from './dates';
 import { extractLotCandidates, hasConsensus, rankCandidates } from './lot';
 
 // The OCR engine is loaded lazily from the app's own /tesseract folder (copied
@@ -52,13 +52,13 @@ interface Pass {
  * ignores reflections. Plain contrast and dark-text passes cover labels.
  */
 export const PASSES: Pass[] = [
-  { variant: 'adapt-inv', width: 800 },
   { variant: 'blur-adapt-inv', width: 800 },
-  { variant: 'plain', width: 1600 },
-  { variant: 'blur-adapt-inv', width: 1200 },
   { variant: 'adapt-inv', width: 600 },
-  { variant: 'adapt', width: 1000 },
   { variant: 'inv', width: 1000 },
+  { variant: 'blur-adapt-inv', width: 1200 },
+  { variant: 'adapt-inv', width: 800 },
+  { variant: 'plain', width: 1600 },
+  { variant: 'adapt', width: 1000 },
 ];
 
 /**
@@ -181,6 +181,34 @@ export interface LotReading {
   rotation: Rotation;
 }
 
+/** Everything the OCR passes over one region produced, kept for the final vote. */
+interface Evidence {
+  texts: string[];
+  man: string[];
+  exp: string[];
+}
+
+function addText(ev: Evidence, text: string): void {
+  ev.texts.push(text);
+  const d = parseCanDates(text);
+  if (d.man) ev.man.push(d.man);
+  if (d.exp) ev.exp.push(d.exp);
+}
+
+const mostCommon = (xs: string[]) =>
+  [...xs.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map<string, number>())].sort((a, b) => b[1] - a[1])[0]?.[0];
+
+/**
+ * Final answer from all passes. The production date printed under the code
+ * (when read reliably) fixes misread digits in the code's first four
+ * characters, which encode that same date.
+ */
+function conclude(ev: Evidence, rotation: Rotation): LotReading {
+  const prefix = trustedLotPrefix(ev.man, ev.exp);
+  const lots = rankCandidates(ev.texts.map((t) => extractLotCandidates(t, prefix)), prefix);
+  return { lots, dates: { man: mostCommon(ev.man), exp: mostCommon(ev.exp) }, rotation };
+}
+
 /**
  * Read the batch number with several preprocessing variants and let them vote.
  * Each variant is tried the right way up and upside down (a can is easily
@@ -195,29 +223,44 @@ async function readLotIn(
   crop?: DOMRect,
   onProgress?: (p: number) => void,
   rotations: Rotation[] = [0, 180],
-): Promise<LotReading> {
+  ev: Evidence = { texts: [], man: [], exp: [] },
+): Promise<{ ev: Evidence; rotation: Rotation; found: boolean }> {
   const reads: string[][] = [];
-  const found = new Set<Rotation>();
-  const dates: CanDates = {};
+  // How convincingly each orientation reads as a can print: a pass with a
+  // code scores one point, a pass with a labelled date ("MAN", "EXP") another.
+  // Upside-down print produces junk codes too, but rarely dates.
+  const score = new Map<Rotation, number>(rotations.map((r) => [r, 0]));
   const total = PASSES.length * rotations.length;
   let done = 0;
+  const byRotation = new Map<Rotation, Evidence>();
+  const best = () => [...score].sort((a, b) => b[1] - a[1])[0];
   outer: for (const { variant, width } of PASSES) {
     for (const rotation of rotations) {
       done++;
-      // Once some orientation has produced a code, only that orientation is worth reading.
-      if (found.size && !found.has(rotation)) continue;
+      // Once one orientation clearly holds the print, the others are not worth reading.
+      const [lead, leadScore] = best();
+      if (leadScore >= 2 && lead !== rotation && score.get(rotation) === 0) continue;
       const text = await recognize(preprocess(source, sw, sh, crop, variant, width, rotation));
       const lots = extractLotCandidates(text);
-      if (lots.length) found.add(rotation);
-      reads.push(lots);
       const d = parseCanDates(text);
-      dates.man ??= d.man;
-      dates.exp ??= d.exp;
+      score.set(rotation, score.get(rotation)! + (lots.length ? 1 : 0) + (d.man || d.exp ? 1 : 0));
+      reads.push(lots);
+      const rev = byRotation.get(rotation) ?? { texts: [], man: [], exp: [] };
+      byRotation.set(rotation, rev);
+      addText(rev, text);
       onProgress?.(done / total);
       if (hasConsensus(reads)) break outer;
     }
   }
-  return { lots: rankCandidates(reads), dates, rotation: found.values().next().value ?? 0 };
+  const [rotation, top] = best();
+  const rev = byRotation.get(rotation);
+  if (rev) {
+    ev.texts.push(...rev.texts);
+    ev.man.push(...rev.man);
+    ev.exp.push(...rev.exp);
+  }
+  const found = top > 0 && rev?.texts.some((t) => extractLotCandidates(t).length) === true;
+  return { ev, rotation, found };
 }
 
 /**
@@ -225,7 +268,7 @@ async function readLotIn(
  * second or so and waits until the same code shows up twice.
  */
 export async function quickRead(source: CanvasImageSource, sw: number, sh: number, crop: DOMRect, rotation: Rotation): Promise<string[]> {
-  return extractLotCandidates(await recognize(preprocess(source, sw, sh, crop, 'adapt-inv', 800, rotation)));
+  return extractLotCandidates(await recognize(preprocess(source, sw, sh, crop, 'blur-adapt-inv', 800, rotation)));
 }
 
 /** Draw the source rotated, capped at `maxSide` pixels. */
@@ -251,6 +294,7 @@ async function locateLotLine(canvas: HTMLCanvasElement): Promise<DOMRect | null>
   for (const { variant, width } of [
     { variant: 'plain' as Variant, width: 1600 },
     { variant: 'adapt-inv' as Variant, width: 1600 },
+    { variant: 'blur-adapt-inv' as Variant, width: 1600 },
   ]) {
     const scaled = preprocess(canvas, canvas.width, canvas.height, undefined, variant, width);
     const k = canvas.width / scaled.width;
@@ -267,31 +311,32 @@ async function locateLotLine(canvas: HTMLCanvasElement): Promise<DOMRect | null>
     if (best) {
       const { x0, y0, x1, y1 } = best.bbox;
       const lh = (y1 - y0) * k;
-      // Generous margins: the line may be partly lost to glare at this scale.
-      const x = Math.max(0, x0 * k - lh * 2);
+      // Generous margins: at this scale part of the line may be lost to glare
+      // (a cut-off first "6" reads as "5"). The two date lines below are kept:
+      // the production date confirms the code.
+      const x = Math.max(0, x0 * k - lh * 5);
       const y = Math.max(0, y0 * k - lh * 1.2);
-      const w = Math.min(canvas.width - x, (x1 - x0) * k + lh * 6);
-      const h = Math.min(canvas.height - y, lh * 3.4);
+      const w = Math.min(canvas.width - x, (x1 - x0) * k + lh * 10);
+      const h = Math.min(canvas.height - y, lh * 5.5);
       return new DOMRect(x, y, w, h);
     }
   }
   return null;
 }
 
-/** Expiry (and production) dates are printed under the code; try a couple of passes for them. */
-async function readDates(source: CanvasImageSource, sw: number, sh: number, crop: DOMRect | undefined, known: CanDates, rotation: Rotation = 0): Promise<CanDates> {
-  const dates = { ...known };
+/**
+ * The dates are printed under the code; read a few more passes until the
+ * production date is confirmed, since it double-checks the code.
+ */
+async function readDates(source: CanvasImageSource, sw: number, sh: number, crop: DOMRect | undefined, ev: Evidence, rotation: Rotation = 0): Promise<void> {
   for (const { variant, width } of [
     { variant: 'adapt-inv' as Variant, width: 1200 },
-    { variant: 'plain' as Variant, width: 1600 },
     { variant: 'blur-adapt-inv' as Variant, width: 1000 },
+    { variant: 'plain' as Variant, width: 1600 },
   ]) {
-    if (dates.exp) break;
-    const d = parseCanDates(await recognize(preprocess(source, sw, sh, crop, variant, width, rotation)));
-    dates.man ??= d.man;
-    dates.exp ??= d.exp;
+    if (trustedLotPrefix(ev.man, ev.exp)) break;
+    addText(ev, await recognize(preprocess(source, sw, sh, crop, variant, width, rotation)));
   }
-  return dates;
 }
 
 /**
@@ -307,9 +352,9 @@ export async function readLot(
   onProgress?: (p: number) => void,
 ): Promise<LotReading> {
   if (crop) {
-    const reading = await readLotIn(source, sw, sh, crop, onProgress, [0, 180]);
-    if (reading.lots.length) reading.dates = await readDates(source, sw, sh, crop, reading.dates, reading.rotation);
-    return reading;
+    const { ev, rotation, found } = await readLotIn(source, sw, sh, crop, onProgress, [0, 180]);
+    if (found) await readDates(source, sw, sh, crop, ev, rotation);
+    return conclude(ev, rotation);
   }
 
   const orientations: Rotation[] = [0, 180, 90, 270];
@@ -318,14 +363,13 @@ export async function readLot(
     const line = await locateLotLine(canvas);
     onProgress?.((i + 1) / (orientations.length * 2));
     if (!line) continue;
-    const reading = await readLotIn(canvas, canvas.width, canvas.height, line, (p) => onProgress?.(0.5 + p / 2), [0]);
-    if (reading.lots.length) {
-      // Dates sit on the two lines below the code.
-      const below = new DOMRect(line.x, line.y, line.width, Math.min(canvas.height - line.y, line.height * 2.2));
-      reading.dates = await readDates(canvas, canvas.width, canvas.height, below, reading.dates);
-      return reading;
+    const { ev, found } = await readLotIn(canvas, canvas.width, canvas.height, line, (p) => onProgress?.(0.5 + p / 2), [0]);
+    if (found) {
+      await readDates(canvas, canvas.width, canvas.height, line, ev);
+      return { ...conclude(ev, 0), rotation: orientations[i] };
     }
   }
   // Nothing located: fall back to reading the whole frame.
-  return readLotIn(source, sw, sh, undefined, onProgress, orientations);
+  const { ev, rotation } = await readLotIn(source, sw, sh, undefined, onProgress, orientations);
+  return conclude(ev, rotation);
 }
