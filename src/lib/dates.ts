@@ -60,3 +60,43 @@ export function productionDateFromLot(lot: string, now = new Date()): string | u
   if (d.getUTCFullYear() !== year) return undefined;
   return `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}.${year}`;
 }
+
+/** Batch-number prefix for a production date: last digit of the year + day of the year ("01.05.2026" → "6121"). */
+export function lotPrefixFromDate(date: string): string | undefined {
+  const m = date.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (!m) return undefined;
+  const [d, mo, y] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const t = Date.UTC(y, mo - 1, d);
+  const day = Math.round((t - Date.UTC(y, 0, 1)) / 864e5) + 1;
+  return `${y % 10}${String(day).padStart(3, '0')}`;
+}
+
+/** Nestlé formula keeps two years: "EXP 30 04 2028" goes with "MAN 01 05 2026". */
+function productionFromExpiry(exp: string): string | undefined {
+  const m = exp.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (!m) return undefined;
+  const d = new Date(Date.UTC(Number(m[3]) - 2, Number(m[2]) - 1, Number(m[1]) + 1));
+  return `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
+}
+
+/**
+ * The batch-number prefix the dates on the can vouch for, or undefined when
+ * the evidence is thin. A production date counts once it was read twice the
+ * same way, or once the expiry date (two years later) agrees with it: one
+ * misread date must never overrule the code itself.
+ */
+export function trustedLotPrefix(manReads: string[], expReads: string[]): string | undefined {
+  const votes = new Map<string, number>();
+  for (const man of manReads) {
+    const p = lotPrefixFromDate(man);
+    if (p) votes.set(p, (votes.get(p) ?? 0) + 1);
+  }
+  const fromExp = new Set(expReads.map(productionFromExpiry).filter(Boolean).map((d) => lotPrefixFromDate(d!)));
+  let best: string | undefined;
+  let bestScore = 0;
+  for (const [p, n] of votes) {
+    const score = n + (fromExp.has(p) ? 1 : 0);
+    if (score >= 2 && score > bestScore) [best, bestScore] = [p, score];
+  }
+  return best;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCanDates, parseDate, productionDateFromLot } from './dates';
+import { lotPrefixFromDate, parseCanDates, parseDate, productionDateFromLot, trustedLotPrefix } from './dates';
 
 describe('parseDate', () => {
   it('reads day month year in several layouts', () => {
@@ -36,5 +36,24 @@ describe('productionDateFromLot', () => {
   });
   it('rejects impossible days', () => {
     expect(productionDateFromLot('5999000000', now)).toBeUndefined();
+  });
+});
+
+describe('batch prefix from the dates on the can', () => {
+  it('encodes the production date like the batch number does', () => {
+    expect(lotPrefixFromDate('01.05.2026')).toBe('6121');
+    expect(lotPrefixFromDate('04.05.2026')).toBe('6124');
+    expect(lotPrefixFromDate('31.12.2024')).toBe('4366');
+    expect(lotPrefixFromDate('05.2026')).toBeUndefined();
+  });
+
+  it('trusts a production date read twice, or confirmed by the expiry date', () => {
+    expect(trustedLotPrefix(['04.05.2026'], [])).toBeUndefined();
+    expect(trustedLotPrefix(['04.05.2026', '04.05.2026'], [])).toBe('6124');
+    expect(trustedLotPrefix(['04.05.2026'], ['03.05.2028'])).toBe('6124');
+    expect(trustedLotPrefix(['01.05.2026'], ['30.04.2028'])).toBe('6121');
+    // A one-off misread date that the expiry date does not back up is ignored.
+    expect(trustedLotPrefix(['01.05.2026'], ['03.05.2028'])).toBeUndefined();
+    expect(trustedLotPrefix([], ['03.05.2028', '03.05.2028'])).toBeUndefined();
   });
 });
